@@ -5,8 +5,12 @@ export default function Toolbar({
   setShowGrid,
   opacity,
   setOpacity,
-  canSave,
-  onSave,
+  maskName,
+  setMaskName,
+  canSaveNew,
+  canUpdate,
+  onSaveNew,
+  onUpdate,
   onReset,
   onExportJson
 }) {
@@ -33,11 +37,25 @@ export default function Toolbar({
         <span style={{ width: 44, textAlign: "right" }}>{opacity.toFixed(2)}</span>
       </label>
 
-      <button onClick={onSave} disabled={!canSave}>
-        Save mask
+      <label style={styles.label}>
+        Nazwa
+        <input
+          value={maskName}
+          onChange={(e) => setMaskName(e.target.value)}
+          placeholder="np. Okno lewe"
+          style={styles.input}
+        />
+      </label>
+
+      <button onClick={onSaveNew} disabled={!canSaveNew}>
+        Save new
       </button>
 
-      <button onClick={onExportJson} disabled={!canSave}>
+      <button onClick={onUpdate} disabled={!canUpdate}>
+        Update
+      </button>
+
+      <button onClick={onExportJson} disabled={!canSaveNew && !canUpdate}>
         Export JSON
       </button>
 
@@ -57,5 +75,6 @@ const styles = {
     borderRadius: 8,
     background: "#fff"
   },
-  label: { display: "flex", gap: 8, alignItems: "center" }
+  label: { display: "flex", gap: 8, alignItems: "center" },
+  input: { padding: "6px 8px", border: "1px solid #ccc", borderRadius: 6 }
 };

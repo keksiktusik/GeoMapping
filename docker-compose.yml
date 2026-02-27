@@ -1,0 +1,21 @@
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: geomapping
+    ports:
+      - "3306:3306"
+
+  api:
+    build: ./backend
+    environment:
+      DB_HOST: db
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: geomapping
+      PORT: 3001
+    ports:
+      - "3001:3001"
+    depends_on:
+      - db
