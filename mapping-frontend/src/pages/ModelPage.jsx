@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import CanvasEditor from "../components/CanvasEditor";
+import WallScene from "../components/WallScene";
 import Toolbar from "../components/Toolbar";
 import MaskList from "../components/MaskList";
 import {
@@ -12,22 +13,38 @@ import {
 export default function ModelPage() {
   const modelId = 1;
 
+  // (ważne: te wartości muszą zgadzać się z CanvasEditor)
+  const WALL_W = 800;
+  const WALL_H = 500;
+
   // editor state
   const [mode, setMode] = useState("draw"); // draw/edit
   const [points, setPoints] = useState([]);
   const [isClosed, setIsClosed] = useState(false);
 
   // settings
-  const [opacity, setOpacity] = useState(0.35);
-  const [showGrid, setShowGrid] = useState(false);
+const [opacity, setOpacity] = useState(0.35);
+const [showGrid, setShowGrid] = useState(false);
 
-  // mask name
-  const [maskName, setMaskName] = useState("");
+// 🔥 NOWE – tryb kalibracji projektora
+const [calibrate, setCalibrate] = useState(false);
+
+// 🔥 NOWE – 4 rogi projekcji (warp / keystone)
+const [warp, setWarp] = useState({
+  tl: { x: 0, y: 0 },
+  tr: { x: 800, y: 0 },
+  br: { x: 800, y: 500 },
+  bl: { x: 0, y: 500 }
+});
+
+// mask name
+const [maskName, setMaskName] = useState("")
 
   // saved masks
   const [masks, setMasks] = useState([]);
   const [selectedMaskId, setSelectedMaskId] = useState(null);
 
+  // load masks on start
   useEffect(() => {
     (async () => {
       try {
@@ -40,10 +57,7 @@ export default function ModelPage() {
     })();
   }, [modelId]);
 
-  const hasPolygon = useMemo(
-    () => isClosed && points.length >= 3,
-    [isClosed, points.length]
-  );
+  const hasPolygon = useMemo(() => isClosed && points.length >= 3, [isClosed, points.length]);
 
   const canSaveNew = useMemo(
     () => hasPolygon && maskName.trim().length > 0,
@@ -61,6 +75,7 @@ export default function ModelPage() {
     setMode("draw");
     setSelectedMaskId(null);
     setMaskName("");
+    setOpacity(0.35);
   };
 
   const exportJson = () => {
@@ -68,7 +83,8 @@ export default function ModelPage() {
 
     const payload = {
       id: selectedMaskId,
-      name: maskName,
+      modelId,
+      name: maskName.trim(),
       type: "polygon",
       opacity,
       points: points.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }))
@@ -93,10 +109,10 @@ export default function ModelPage() {
       setMasks((prev) => [created, ...prev]);
       setSelectedMaskId(created.id);
       setMode("edit");
-      // zostawiamy w edytorze jako aktualnie wybraną
+      // zostawiamy punkty w edytorze - edytujesz dalej
     } catch (e) {
       console.error(e);
-      alert("Nie udało się zapisać maski (sprawdź API / mock).");
+      alert("Nie udało się zapisać maski (sprawdź API / backend).");
     }
   };
 
@@ -115,7 +131,7 @@ export default function ModelPage() {
       alert("Zaktualizowano maskę ✅");
     } catch (e) {
       console.error(e);
-      alert("Nie udało się zaktualizować maski (sprawdź API / mock).");
+      alert("Nie udało się zaktualizować maski (sprawdź API / backend).");
     }
   };
 
@@ -126,7 +142,7 @@ export default function ModelPage() {
       if (selectedMaskId === id) resetDraft();
     } catch (e) {
       console.error(e);
-      alert("Nie udało się usunąć maski (sprawdź API / mock).");
+      alert("Nie udało się usunąć maski (sprawdź API / backend).");
     }
   };
 
@@ -136,13 +152,13 @@ export default function ModelPage() {
 
     setSelectedMaskId(id);
     setMaskName(mask.name || "");
-    setPoints(mask.points || []);
+    setPoints(Array.isArray(mask.points) ? mask.points : []);
     setOpacity(typeof mask.opacity === "number" ? mask.opacity : 0.35);
     setIsClosed(true);
     setMode("edit");
   };
 
-  // PPM reset
+  // PPM reset (opcjonalnie)
   const handleContextMenu = (e) => {
     e.preventDefault();
     resetDraft();
@@ -150,7 +166,7 @@ export default function ModelPage() {
 
   return (
     <div style={styles.page} onContextMenu={handleContextMenu}>
-      <h2 style={{ margin: 0 }}>3D Mapping – Mask Editor</h2>
+      <h2 style={{ margin: 0 }}>3D Mapping – Ściana + Okno (Maska)</h2>
 
       <Toolbar
         mode={mode}
@@ -177,23 +193,43 @@ export default function ModelPage() {
             onSelect={handleSelectMask}
             onDelete={deleteMask}
           />
+
           <div style={styles.tip}>
-            Flow: narysuj poligon → zamknij zielonym punktem → wpisz nazwę → Save new.
-            Kliknij maskę z listy → edytuj punkty → Update.
+            Demo: projekcja na ścianie + maska okna wycina obraz. Rysuj poligon → Save new → kliknij
+            maskę → edytuj punkty → Update. Grid = kalibracja.
           </div>
         </div>
 
         <div style={styles.center}>
-          <CanvasEditor
-            mode={mode}
-            setMode={setMode}
-            points={points}
-            setPoints={setPoints}
-            isClosed={isClosed}
-            setIsClosed={setIsClosed}
-            opacity={opacity}
-            showGrid={showGrid}
-          />
+          {/* PODGLĄD 3D (mapping) */}
+          <div style={styles.block}>
+            <div style={styles.blockTitle}>Podgląd 3D (projekcja + wycięte okno)</div>
+            <WallScene
+  points={hasPolygon ? points : []}
+  opacity={opacity}
+  showGrid={showGrid}
+  warp={warp}
+  wallW={800}
+  wallH={500}
+/>
+          </div>
+
+          {/* EDYTOR 2D (narzędzie do rysowania/edycji) */}
+          <div style={styles.block}>
+            <div style={styles.blockTitle}>Edytor 2D (rysowanie i kalibracja maski)</div>
+            <CanvasEditor
+              mode={mode}
+              setMode={setMode}
+              points={points}
+              setPoints={setPoints}
+              isClosed={isClosed}
+              setIsClosed={setIsClosed}
+              opacity={opacity}
+              showGrid={showGrid}
+              wallW={WALL_W}
+              wallH={WALL_H}
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -215,10 +251,33 @@ const styles = {
     gap: 16,
     alignItems: "flex-start"
   },
-  left: { display: "flex", flexDirection: "column", gap: 12 },
-  center: { display: "flex", flexDirection: "column", gap: 12 },
+  left: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    width: 360
+  },
+  center: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+    flex: 1
+  },
+  block: {
+    background: "#fff",
+    border: "1px solid #eee",
+    borderRadius: 10,
+    padding: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10
+  },
+  blockTitle: {
+    fontSize: 13,
+    color: "#444",
+    fontWeight: 600
+  },
   tip: {
-    width: 340,
     border: "1px solid #eee",
     borderRadius: 8,
     background: "#fff",
