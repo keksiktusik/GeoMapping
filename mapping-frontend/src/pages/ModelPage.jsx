@@ -3,6 +3,7 @@ import CanvasEditor from "../components/CanvasEditor";
 import WallScene from "../components/WallScene";
 import Toolbar from "../components/Toolbar";
 import MaskList from "../components/MaskList";
+import ProjectionTexture from "../components/ProjectionTexture";
 import {
   getMasks,
   createMask,
@@ -13,9 +14,15 @@ import {
 export default function ModelPage() {
   const modelId = 1;
 
-  // (ważne: te wartości muszą zgadzać się z CanvasEditor)
+  // (ważne: te wartości muszą zgadzać się z CanvasEditor i całym pipeline)
   const WALL_W = 800;
   const WALL_H = 500;
+
+  // ✅ ścieżka do modelu (jak koleżanka wrzuci do public/models)
+  const MODEL_URL = "/models/fasada.glb";
+
+  // ✅ przełącznik trybu renderowania
+  const [renderMode, setRenderMode] = useState("plane"); // "plane" | "glb"
 
   // editor state
   const [mode, setMode] = useState("draw"); // draw/edit
@@ -23,26 +30,26 @@ export default function ModelPage() {
   const [isClosed, setIsClosed] = useState(false);
 
   // settings
-const [opacity, setOpacity] = useState(0.35);
-const [showGrid, setShowGrid] = useState(false);
+  const [opacity, setOpacity] = useState(0.35);
+  const [showGrid, setShowGrid] = useState(false);
 
-// 🔥 NOWE – tryb kalibracji projektora
-const [calibrate, setCalibrate] = useState(false);
+  // 4 rogi projekcji (warp / keystone) - używane głównie w trybie plane
+  const [warp, setWarp] = useState({
+    tl: { x: 0, y: 0 },
+    tr: { x: WALL_W, y: 0 },
+    br: { x: WALL_W, y: WALL_H },
+    bl: { x: 0, y: WALL_H }
+  });
 
-// 🔥 NOWE – 4 rogi projekcji (warp / keystone)
-const [warp, setWarp] = useState({
-  tl: { x: 0, y: 0 },
-  tr: { x: 800, y: 0 },
-  br: { x: 800, y: 500 },
-  bl: { x: 0, y: 500 }
-});
-
-// mask name
-const [maskName, setMaskName] = useState("")
+  // mask name
+  const [maskName, setMaskName] = useState("");
 
   // saved masks
   const [masks, setMasks] = useState([]);
   const [selectedMaskId, setSelectedMaskId] = useState(null);
+
+  // 🔥 output texture (canvas → three.js)
+  const [projectionTexture, setProjectionTexture] = useState(null);
 
   // load masks on start
   useEffect(() => {
@@ -57,7 +64,10 @@ const [maskName, setMaskName] = useState("")
     })();
   }, [modelId]);
 
-  const hasPolygon = useMemo(() => isClosed && points.length >= 3, [isClosed, points.length]);
+  const hasPolygon = useMemo(
+    () => isClosed && points.length >= 3,
+    [isClosed, points.length]
+  );
 
   const canSaveNew = useMemo(
     () => hasPolygon && maskName.trim().length > 0,
@@ -109,7 +119,6 @@ const [maskName, setMaskName] = useState("")
       setMasks((prev) => [created, ...prev]);
       setSelectedMaskId(created.id);
       setMode("edit");
-      // zostawiamy punkty w edytorze - edytujesz dalej
     } catch (e) {
       console.error(e);
       alert("Nie udało się zapisać maski (sprawdź API / backend).");
@@ -185,6 +194,48 @@ const [maskName, setMaskName] = useState("")
         onExportJson={exportJson}
       />
 
+      {/* ✅ PRZEŁĄCZNIK TRYBU */}
+      <div style={styles.modeBar}>
+        <span style={styles.modeLabel}>Tryb podglądu:</span>
+
+        <button
+          style={{
+            ...styles.modeBtn,
+            ...(renderMode === "plane" ? styles.modeBtnActive : null)
+          }}
+          onClick={() => setRenderMode("plane")}
+          type="button"
+        >
+          PLANE (test + warp)
+        </button>
+
+        <button
+          style={{
+            ...styles.modeBtn,
+            ...(renderMode === "glb" ? styles.modeBtnActive : null)
+          }}
+          onClick={() => setRenderMode("glb")}
+          type="button"
+        >
+          GLB (UV z Blendera)
+        </button>
+
+        <span style={styles.modeHint}>
+          Model: <code>{MODEL_URL}</code>
+        </span>
+      </div>
+
+      {/* 🔥 To generuje teksturę wynikową (tło + grid + zapisane maski + aktualna maska) */}
+      <ProjectionTexture
+        wallW={WALL_W}
+        wallH={WALL_H}
+        showGrid={showGrid}
+        masks={masks}
+        activePoints={points}
+        opacity={opacity}
+        onTexture={setProjectionTexture}
+      />
+
       <div style={styles.main}>
         <div style={styles.left}>
           <MaskList
@@ -195,26 +246,30 @@ const [maskName, setMaskName] = useState("")
           />
 
           <div style={styles.tip}>
-            Demo: projekcja na ścianie + maska okna wycina obraz. Rysuj poligon → Save new → kliknij
-            maskę → edytuj punkty → Update. Grid = kalibracja.
+            Demo: projekcja + maski. Tryb <b>PLANE</b> jest do testów i warpa. Tryb <b>GLB</b> zadziała,
+            gdy w repo będzie <code>public/models/fasada.glb</code> z UV.
           </div>
         </div>
 
         <div style={styles.center}>
           {/* PODGLĄD 3D (mapping) */}
           <div style={styles.block}>
-            <div style={styles.blockTitle}>Podgląd 3D (projekcja + wycięte okno)</div>
+            <div style={styles.blockTitle}>Podgląd 3D</div>
+
             <WallScene
-  points={hasPolygon ? points : []}
-  opacity={opacity}
-  showGrid={showGrid}
-  warp={warp}
-  wallW={800}
-  wallH={500}
-/>
+              renderMode={renderMode}
+              modelUrl={MODEL_URL}
+              points={hasPolygon ? points : []}
+              opacity={opacity}
+              showGrid={showGrid}
+              warp={warp}
+              wallW={WALL_W}
+              wallH={WALL_H}
+              projectionTexture={projectionTexture}
+            />
           </div>
 
-          {/* EDYTOR 2D (narzędzie do rysowania/edycji) */}
+          {/* EDYTOR 2D */}
           <div style={styles.block}>
             <div style={styles.blockTitle}>Edytor 2D (rysowanie i kalibracja maski)</div>
             <CanvasEditor
@@ -245,6 +300,37 @@ const styles = {
     gap: 16,
     background: "#fafafa",
     minHeight: "100vh"
+  },
+  modeBar: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "#fff",
+    border: "1px solid #eee",
+    borderRadius: 10,
+    padding: 10
+  },
+  modeLabel: {
+    fontSize: 13,
+    color: "#444",
+    fontWeight: 600
+  },
+  modeBtn: {
+    border: "1px solid #ddd",
+    background: "#f7f7f7",
+    padding: "8px 10px",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontSize: 13
+  },
+  modeBtnActive: {
+    background: "#e9f0ff",
+    border: "1px solid #9db9ff"
+  },
+  modeHint: {
+    marginLeft: "auto",
+    fontSize: 12,
+    color: "#666"
   },
   main: {
     display: "flex",

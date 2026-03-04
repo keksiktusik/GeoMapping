@@ -2,13 +2,12 @@ import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid, useTexture } from "@react-three/drei";
 import { useMemo } from "react";
+import FacadeModel from "./FacadeModel";
 
-/**
- * points: [{x,y}...] w pikselach (np. 800x500)
- * warp: { tl,tr,br,bl } w pikselach (te same wymiary co wallW/wallH)
- * wallW, wallH: rozmiar "ściany" w px dla przeliczeń
- */
 function SceneContent({
+  renderMode = "plane",
+  modelUrl = "/models/fasada.glb",
+
   points,
   opacity,
   showGrid,
@@ -16,16 +15,24 @@ function SceneContent({
   wallW = 800,
   wallH = 500,
   segmentsX = 40,
-  segmentsY = 25
+  segmentsY = 25,
+  projectionTexture = null
 }) {
-  const texture = useTexture("/projection.jpg");
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
+  // ✅ hook jest tu OK, bo SceneContent jest dzieckiem Canvas
+  const fallbackTexture = useTexture("/projection.jpg");
 
-  // Rozmiar ściany w świecie 3D (zachowujemy proporcje)
+  const texture = useMemo(() => {
+    const t = projectionTexture ?? fallbackTexture;
+    if (!t) return null;
+
+    t.wrapS = THREE.ClampToEdgeWrapping;
+    t.wrapT = THREE.ClampToEdgeWrapping;
+    t.needsUpdate = true;
+    return t;
+  }, [projectionTexture, fallbackTexture]);
+
   const wallSize = useMemo(() => ({ w: 8, h: 5 }), []);
 
-  // ====== helper: px -> world coords (dla OKNA i dla warpa) ======
   const pxToWorld = useMemo(() => {
     return (p) => {
       const nx = (p.x / wallW - 0.5) * wallSize.w;
@@ -34,14 +41,13 @@ function SceneContent({
     };
   }, [wallW, wallH, wallSize]);
 
-  // ====== WINDOW polygon geometry (okno blackout) ======
   const windowMesh = useMemo(() => {
+    if (renderMode !== "plane") return null;
     if (!points || points.length < 3) return null;
 
     const shape = new THREE.Shape();
     const p0 = pxToWorld(points[0]);
     shape.moveTo(p0.x, p0.y);
-
     for (let i = 1; i < points.length; i++) {
       const pi = pxToWorld(points[i]);
       shape.lineTo(pi.x, pi.y);
@@ -49,11 +55,11 @@ function SceneContent({
     shape.closePath();
 
     return new THREE.ShapeGeometry(shape);
-  }, [points, pxToWorld]);
+  }, [renderMode, points, pxToWorld]);
 
-  // ====== WARPED WALL geometry (plane z segmentami + deformacja) ======
   const wallGeometry = useMemo(() => {
-    // fallback warp = pełen prostokąt ściany
+    if (renderMode !== "plane") return null;
+
     const w = warp || {
       tl: { x: 0, y: 0 },
       tr: { x: wallW, y: 0 },
@@ -61,26 +67,19 @@ function SceneContent({
       bl: { x: 0, y: wallH }
     };
 
-    // rogi w world
     const TL = pxToWorld(w.tl);
     const TR = pxToWorld(w.tr);
     const BR = pxToWorld(w.br);
     const BL = pxToWorld(w.bl);
 
-    // Plane z segmentami
     const geom = new THREE.PlaneGeometry(wallSize.w, wallSize.h, segmentsX, segmentsY);
-
     const pos = geom.attributes.position;
     const v = new THREE.Vector3();
 
-    // Bilinear interpolation:
-    // P(u,v) = (1-u)(1-v)TL + u(1-v)TR + u v BR + (1-u) v BL
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i);
-
-      // planeGeometry ma x w [-w/2..w/2], y w [-h/2..h/2]
-      const u = (v.x / wallSize.w) + 0.5; // 0..1
-      const t = (v.y / wallSize.h) + 0.5; // 0..1
+      const u = v.x / wallSize.w + 0.5;
+      const t = v.y / wallSize.h + 0.5;
 
       const x =
         (1 - u) * (1 - t) * TL.x +
@@ -98,44 +97,25 @@ function SceneContent({
     }
 
     pos.needsUpdate = true;
-    geom.computeVertexNormals(); // niekonieczne do basicMaterial, ale ok
-
+    geom.computeVertexNormals();
     return geom;
-  }, [warp, wallW, wallH, pxToWorld, wallSize, segmentsX, segmentsY]);
-
-  // ====== Warp corners helper overlay (opcjonalnie) ======
-  const warpCornerLines = useMemo(() => {
-    if (!warp) return null;
-
-    const w = warp;
-    const TL = pxToWorld(w.tl);
-    const TR = pxToWorld(w.tr);
-    const BR = pxToWorld(w.br);
-    const BL = pxToWorld(w.bl);
-
-    const pts = [
-      new THREE.Vector3(TL.x, TL.y, 0.01),
-      new THREE.Vector3(TR.x, TR.y, 0.01),
-      new THREE.Vector3(BR.x, BR.y, 0.01),
-      new THREE.Vector3(BL.x, BL.y, 0.01),
-      new THREE.Vector3(TL.x, TL.y, 0.01)
-    ];
-
-    const g = new THREE.BufferGeometry().setFromPoints(pts);
-    return g;
-  }, [warp, pxToWorld]);
+  }, [renderMode, warp, wallW, wallH, pxToWorld, wallSize, segmentsX, segmentsY]);
 
   return (
     <>
       <ambientLight intensity={0.8} />
       <directionalLight position={[5, 5, 5]} intensity={0.6} />
 
-      {/* ŚCIANA z "rzutowaną" teksturą (deformowana warpem) */}
-      <mesh geometry={wallGeometry}>
-        <meshBasicMaterial map={texture} />
-      </mesh>
+      {renderMode === "plane" && wallGeometry && (
+        <mesh geometry={wallGeometry}>
+          <meshBasicMaterial map={texture ?? null} />
+        </mesh>
+      )}
 
-      {/* OKNO = blackout na projekcji */}
+      {renderMode === "glb" && (
+        <FacadeModel modelUrl={modelUrl} projectionTexture={texture} />
+      )}
+
       {windowMesh && (
         <mesh geometry={windowMesh} position={[0, 0, 0.02]}>
           <meshBasicMaterial
@@ -146,14 +126,6 @@ function SceneContent({
         </mesh>
       )}
 
-      {/* Opcjonalnie: podgląd obrysu warpa (żeby było widać kalibrację) */}
-      {warpCornerLines && (
-        <line geometry={warpCornerLines}>
-          <lineBasicMaterial color={"red"} />
-        </line>
-      )}
-
-      {/* Grid kalibracyjny */}
       {showGrid && (
         <Grid
           args={[10, 10]}
@@ -173,6 +145,7 @@ function SceneContent({
 }
 
 export default function WallScene(props) {
+  // ✅ Canvas jest TU, więc hooks w SceneContent zawsze mają kontekst
   return (
     <div
       style={{

@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const W = 800;
-const H = 500;
-
 const HIT_RADIUS_CLOSE = 10;
 const HIT_RADIUS_DRAG = 12;
 
@@ -14,7 +11,9 @@ export default function CanvasEditor({
   isClosed,
   setIsClosed,
   opacity,
-  showGrid
+  showGrid,
+  wallW = 800,
+  wallH = 500
 }) {
   const canvasRef = useRef(null);
   const [dragIndex, setDragIndex] = useState(null);
@@ -26,15 +25,39 @@ export default function CanvasEditor({
     [points.length, isClosed]
   );
 
+  // DPI + rozmiar canvas (reaguje na wallW/wallH + zmiany DPR)
   useEffect(() => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const dpr = window.devicePixelRatio || 1;
+
+    // CSS size (jak duży jest "na ekranie")
+    canvas.style.width = `${wallW}px`;
+    canvas.style.height = `${wallH}px`;
+
+    // buffer size (ile ma pikseli naprawdę)
+    canvas.width = Math.round(wallW * dpr);
+    canvas.height = Math.round(wallH * dpr);
+
+    const ctx = canvas.getContext("2d");
+    // Ustawiamy przekształcenie tak, by rysować w jednostkach "CSS px"
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }, [wallW, wallH]);
+
+  // rysowanie
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
 
-    ctx.clearRect(0, 0, W, H);
+    // Czyścimy w "CSS px" (bo mamy setTransform(dpr,...))
+    ctx.clearRect(0, 0, wallW, wallH);
 
     // wall
     ctx.fillStyle = "#f5f5f5";
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, wallW, wallH);
 
     // grid
     if (showGrid) {
@@ -43,16 +66,16 @@ export default function CanvasEditor({
       ctx.lineWidth = 1;
       const step = 50;
 
-      for (let x = 0; x <= W; x += step) {
+      for (let x = 0; x <= wallW; x += step) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, H);
+        ctx.lineTo(x, wallH);
         ctx.stroke();
       }
-      for (let y = 0; y <= H; y += step) {
+      for (let y = 0; y <= wallH; y += step) {
         ctx.beginPath();
         ctx.moveTo(0, y);
-        ctx.lineTo(W, y);
+        ctx.lineTo(wallW, y);
         ctx.stroke();
       }
       ctx.restore();
@@ -61,12 +84,12 @@ export default function CanvasEditor({
     // border
     ctx.strokeStyle = "#999";
     ctx.lineWidth = 2;
-    ctx.strokeRect(0, 0, W, H);
+    ctx.strokeRect(0, 0, wallW, wallH);
 
-    // fill
+    // fill (zamknięty polygon)
     if (isClosed && points.length >= 3) {
       ctx.save();
-      ctx.globalAlpha = opacity;
+      ctx.globalAlpha = typeof opacity === "number" ? opacity : 0.35;
       ctx.fillStyle = "black";
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
@@ -90,6 +113,7 @@ export default function CanvasEditor({
     // points
     points.forEach((p, idx) => {
       const isFirst = idx === 0;
+
       ctx.fillStyle = isFirst ? "green" : "blue";
       ctx.beginPath();
       ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
@@ -112,15 +136,24 @@ export default function CanvasEditor({
         ? canClose
           ? "DRAW: klikaj punkty. Kliknij zielony punkt aby zamknąć."
           : "DRAW: klikaj punkty (min 3)."
-        : "EDIT: złap i przeciągnij punkt. (PPM reset w ModelPage)";
+        : "EDIT: złap i przeciągnij punkt.";
 
     ctx.fillText(hint, 16, 24);
-  }, [points, isClosed, opacity, showGrid, mode, canClose]);
+  }, [points, isClosed, opacity, showGrid, mode, canClose, wallW, wallH]);
 
+  // przeliczanie pozycji myszy na układ canvas (w CSS px)
   const getCanvasPoint = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+    // rect.width/height mogą się różnić (np. zoom, responsywność)
+    const scaleX = wallW / rect.width;
+    const scaleY = wallH / rect.height;
+
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
   };
 
   const findPointIndexNear = (pt) => {
@@ -136,6 +169,7 @@ export default function CanvasEditor({
 
     const p = getCanvasPoint(e);
 
+    // zamknięcie wielokąta kliknięciem w pierwszy (zielony) punkt
     if (canClose && dist(p, points[0]) <= HIT_RADIUS_CLOSE) {
       setIsClosed(true);
       setMode("edit");
@@ -147,10 +181,10 @@ export default function CanvasEditor({
 
   const handleMouseDown = (e) => {
     if (mode !== "edit") return;
-    if (points.length === 0) return;
 
     const p = getCanvasPoint(e);
     const idx = findPointIndexNear(p);
+
     if (idx !== null) setDragIndex(idx);
   };
 
@@ -159,6 +193,7 @@ export default function CanvasEditor({
     if (dragIndex === null) return;
 
     const p = getCanvasPoint(e);
+
     setPoints((prev) => {
       const next = [...prev];
       next[dragIndex] = p;
@@ -167,14 +202,12 @@ export default function CanvasEditor({
   };
 
   const handleMouseUp = () => {
-    if (dragIndex !== null) setDragIndex(null);
+    setDragIndex(null);
   };
 
   return (
     <canvas
       ref={canvasRef}
-      width={W}
-      height={H}
       onClick={handleClick}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -183,7 +216,7 @@ export default function CanvasEditor({
       style={{
         border: "1px solid #ccc",
         background: "white",
-        cursor: mode === "draw" ? "crosshair" : "grab"
+        cursor: mode === "draw" ? "crosshair" : dragIndex !== null ? "grabbing" : "grab"
       }}
     />
   );
