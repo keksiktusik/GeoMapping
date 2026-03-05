@@ -3,7 +3,10 @@ import { useEffect } from "react";
 
 export default function FacadeGLB({
   modelUrl = "/models/fasada.glb",
-  projectionTexture
+  projectionTexture,
+  scale = 1,
+  position = [0, 0, 0],
+  rotation = [0, 0, 0]
 }) {
   const { scene } = useGLTF(modelUrl);
 
@@ -18,5 +21,9 @@ export default function FacadeGLB({
     });
   }, [scene, projectionTexture]);
 
-  return <primitive object={scene} />;
+  return (
+    <group scale={scale} position={position} rotation={rotation}>
+      <primitive object={scene} />
+    </group>
+  );
 }
