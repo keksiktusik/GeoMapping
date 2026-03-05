@@ -4,6 +4,7 @@ import WallScene from "../components/WallScene";
 import Toolbar from "../components/Toolbar";
 import MaskList from "../components/MaskList";
 import ProjectionTexture from "../components/ProjectionTexture";
+import ProjectorOutput from "../components/ProjectorOutput";
 import {
   getMasks,
   createMask,
@@ -11,17 +12,17 @@ import {
   updateMask as apiUpdateMask
 } from "../services/api";
 
+// ===== stałe poza komponentem =====
+const MODEL_ID = 1;
+const WALL_W = 800;
+const WALL_H = 500;
+const MODEL_URL = "/models/fasada.glb";
+const STORAGE_OUTPUT = "mapping_output_state_v1";
+
 export default function ModelPage() {
-  const modelId = 1;
+  const isOutput = new URLSearchParams(window.location.search).get("output") === "1";
 
-  // (ważne: te wartości muszą zgadzać się z CanvasEditor i całym pipeline)
-  const WALL_W = 800;
-  const WALL_H = 500;
-
-  // ✅ ścieżka do modelu (jak koleżanka wrzuci do public/models)
-  const MODEL_URL = "/models/fasada.glb";
-
-  // ✅ przełącznik trybu renderowania
+  // UI / preview
   const [renderMode, setRenderMode] = useState("plane"); // "plane" | "glb"
 
   // editor state
@@ -33,7 +34,7 @@ export default function ModelPage() {
   const [opacity, setOpacity] = useState(0.35);
   const [showGrid, setShowGrid] = useState(false);
 
-  // 4 rogi projekcji (warp / keystone) - używane głównie w trybie plane
+  // warp / keystone (na razie tylko preview / plane)
   const [warp, setWarp] = useState({
     tl: { x: 0, y: 0 },
     tr: { x: WALL_W, y: 0 },
@@ -48,21 +49,21 @@ export default function ModelPage() {
   const [masks, setMasks] = useState([]);
   const [selectedMaskId, setSelectedMaskId] = useState(null);
 
-  // 🔥 output texture (canvas → three.js)
+  // output texture (canvas → three.js)
   const [projectionTexture, setProjectionTexture] = useState(null);
 
-  // load masks on start
+  // ===== load masks =====
   useEffect(() => {
     (async () => {
       try {
-        const data = await getMasks(modelId);
+        const data = await getMasks(MODEL_ID);
         setMasks(data);
       } catch (e) {
         console.error(e);
         alert("Nie udało się pobrać masek (sprawdź API / mock).");
       }
     })();
-  }, [modelId]);
+  }, []);
 
   const hasPolygon = useMemo(
     () => isClosed && points.length >= 3,
@@ -93,7 +94,7 @@ export default function ModelPage() {
 
     const payload = {
       id: selectedMaskId,
-      modelId,
+      modelId: MODEL_ID,
       name: maskName.trim(),
       type: "polygon",
       opacity,
@@ -115,7 +116,7 @@ export default function ModelPage() {
     };
 
     try {
-      const created = await createMask(modelId, payload);
+      const created = await createMask(MODEL_ID, payload);
       setMasks((prev) => [created, ...prev]);
       setSelectedMaskId(created.id);
       setMode("edit");
@@ -167,15 +168,65 @@ export default function ModelPage() {
     setMode("edit");
   };
 
-  // PPM reset (opcjonalnie)
   const handleContextMenu = (e) => {
     e.preventDefault();
     resetDraft();
   };
 
+  // ===== SYNC: Editor -> localStorage (dla output okna) =====
+  useEffect(() => {
+    if (isOutput) return;
+
+    try {
+      localStorage.setItem(
+        STORAGE_OUTPUT,
+        JSON.stringify({
+          points,
+          isClosed,
+          opacity,
+          showGrid,
+          masks
+          // warp możesz dopisać później, jak wyjście będzie też warpować
+          // warp
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [isOutput, points, isClosed, opacity, showGrid, masks]);
+
+  // ===== OUTPUT VIEW (projektor) =====
+  if (isOutput) {
+    return (
+      <div style={{ width: "100vw", height: "100vh", background: "black" }}>
+        <ProjectorOutput wallW={WALL_W} wallH={WALL_H} />
+      </div>
+    );
+  }
+
+  // ===== EDITOR VIEW =====
+  const openOutput = () => {
+    window.open(`${window.location.pathname}?output=1`, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <div style={styles.page} onContextMenu={handleContextMenu}>
       <h2 style={{ margin: 0 }}>3D Mapping – Ściana + Okno (Maska)</h2>
+
+      <button
+        type="button"
+        onClick={openOutput}
+        style={{
+          alignSelf: "flex-start",
+          padding: "8px 12px",
+          borderRadius: 8,
+          border: "1px solid #ddd",
+          background: "white",
+          cursor: "pointer"
+        }}
+      >
+        Open Output (projektor)
+      </button>
 
       <Toolbar
         mode={mode}
@@ -194,7 +245,6 @@ export default function ModelPage() {
         onExportJson={exportJson}
       />
 
-      {/* ✅ PRZEŁĄCZNIK TRYBU */}
       <div style={styles.modeBar}>
         <span style={styles.modeLabel}>Tryb podglądu:</span>
 
@@ -225,7 +275,6 @@ export default function ModelPage() {
         </span>
       </div>
 
-      {/* 🔥 To generuje teksturę wynikową (tło + grid + zapisane maski + aktualna maska) */}
       <ProjectionTexture
         wallW={WALL_W}
         wallH={WALL_H}
@@ -252,7 +301,6 @@ export default function ModelPage() {
         </div>
 
         <div style={styles.center}>
-          {/* PODGLĄD 3D (mapping) */}
           <div style={styles.block}>
             <div style={styles.blockTitle}>Podgląd 3D</div>
 
@@ -269,7 +317,6 @@ export default function ModelPage() {
             />
           </div>
 
-          {/* EDYTOR 2D */}
           <div style={styles.block}>
             <div style={styles.blockTitle}>Edytor 2D (rysowanie i kalibracja maski)</div>
             <CanvasEditor
