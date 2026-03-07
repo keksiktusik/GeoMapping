@@ -11,6 +11,12 @@ import {
   deleteMask as apiDeleteMask,
   updateMask as apiUpdateMask
 } from "../services/api";
+import TopBar from "../components/layout/TopBar";
+import BottomStatusBar from "../components/layout/BottomStatusBar";
+import SidebarPanel from "../components/layout/SidebarPanel";
+import ProjectorSettings from "../components/ProjectorSettings";
+import WarpEditor from "../components/WarpEditor";
+import { ui } from "../styles/ui";
 
 // ===== stałe poza komponentem =====
 const MODEL_ID = 1;
@@ -20,7 +26,8 @@ const MODEL_URL = "/models/fasada.glb";
 const STORAGE_OUTPUT = "mapping_output_state_v1";
 
 export default function ModelPage() {
-  const isOutput = new URLSearchParams(window.location.search).get("output") === "1";
+  const isOutput =
+    new URLSearchParams(window.location.search).get("output") === "1";
 
   // UI / preview
   const [renderMode, setRenderMode] = useState("plane"); // "plane" | "glb"
@@ -34,7 +41,7 @@ export default function ModelPage() {
   const [opacity, setOpacity] = useState(0.35);
   const [showGrid, setShowGrid] = useState(false);
 
-  // warp / keystone (na razie tylko preview / plane)
+  // warp / keystone
   const [warp, setWarp] = useState({
     tl: { x: 0, y: 0 },
     tr: { x: WALL_W, y: 0 },
@@ -42,8 +49,19 @@ export default function ModelPage() {
     bl: { x: 0, y: WALL_H }
   });
 
-  // mask name
+  // projector settings
+  const [projector, setProjector] = useState({
+    distance: 2.5,
+    offsetX: 0,
+    offsetY: 0,
+    angleX: 0,
+    angleY: 0,
+    angleZ: 0
+  });
+
+  // mask data
   const [maskName, setMaskName] = useState("");
+  const [maskType, setMaskType] = useState("window");
 
   // saved masks
   const [masks, setMasks] = useState([]);
@@ -51,6 +69,9 @@ export default function ModelPage() {
 
   // output texture (canvas → three.js)
   const [projectionTexture, setProjectionTexture] = useState(null);
+
+  // simple backend badge
+  const [backendStatus] = useState("online");
 
   // ===== load masks =====
   useEffect(() => {
@@ -86,6 +107,7 @@ export default function ModelPage() {
     setMode("draw");
     setSelectedMaskId(null);
     setMaskName("");
+    setMaskType("window");
     setOpacity(0.35);
   };
 
@@ -96,9 +118,12 @@ export default function ModelPage() {
       id: selectedMaskId,
       modelId: MODEL_ID,
       name: maskName.trim(),
-      type: "polygon",
+      type: maskType,
       opacity,
-      points: points.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }))
+      points: points.map((p) => ({
+        x: Math.round(p.x),
+        y: Math.round(p.y)
+      }))
     };
 
     console.log("MASK JSON:", payload);
@@ -110,9 +135,12 @@ export default function ModelPage() {
 
     const payload = {
       name: maskName.trim(),
-      type: "polygon",
+      type: maskType,
       opacity,
-      points: points.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }))
+      points: points.map((p) => ({
+        x: Math.round(p.x),
+        y: Math.round(p.y)
+      }))
     };
 
     try {
@@ -131,8 +159,12 @@ export default function ModelPage() {
 
     const patch = {
       name: maskName.trim(),
+      type: maskType,
       opacity,
-      points: points.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }))
+      points: points.map((p) => ({
+        x: Math.round(p.x),
+        y: Math.round(p.y)
+      }))
     };
 
     try {
@@ -162,6 +194,7 @@ export default function ModelPage() {
 
     setSelectedMaskId(id);
     setMaskName(mask.name || "");
+    setMaskType(mask.type || "window");
     setPoints(Array.isArray(mask.points) ? mask.points : []);
     setOpacity(typeof mask.opacity === "number" ? mask.opacity : 0.35);
     setIsClosed(true);
@@ -185,15 +218,15 @@ export default function ModelPage() {
           isClosed,
           opacity,
           showGrid,
-          masks
-          // warp możesz dopisać później, jak wyjście będzie też warpować
-          // warp
+          masks,
+          warp,
+          projector
         })
       );
     } catch {
       // ignore
     }
-  }, [isOutput, points, isClosed, opacity, showGrid, masks]);
+  }, [isOutput, points, isClosed, opacity, showGrid, masks, warp, projector]);
 
   // ===== OUTPUT VIEW (projektor) =====
   if (isOutput) {
@@ -204,76 +237,22 @@ export default function ModelPage() {
     );
   }
 
-  // ===== EDITOR VIEW =====
   const openOutput = () => {
-    window.open(`${window.location.pathname}?output=1`, "_blank", "noopener,noreferrer");
+    window.open(
+      `${window.location.pathname}?output=1`,
+      "_blank",
+      "noopener,noreferrer"
+    );
   };
 
   return (
-    <div style={styles.page} onContextMenu={handleContextMenu}>
-      <h2 style={{ margin: 0 }}>3D Mapping – Ściana + Okno (Maska)</h2>
-
-      <button
-        type="button"
-        onClick={openOutput}
-        style={{
-          alignSelf: "flex-start",
-          padding: "8px 12px",
-          borderRadius: 8,
-          border: "1px solid #ddd",
-          background: "white",
-          cursor: "pointer"
-        }}
-      >
-        Open Output (projektor)
-      </button>
-
-      <Toolbar
-        mode={mode}
-        setMode={setMode}
-        showGrid={showGrid}
-        setShowGrid={setShowGrid}
-        opacity={opacity}
-        setOpacity={setOpacity}
-        maskName={maskName}
-        setMaskName={setMaskName}
-        canSaveNew={canSaveNew}
-        canUpdate={canUpdate}
-        onSaveNew={saveNew}
-        onUpdate={updateSelected}
-        onReset={resetDraft}
-        onExportJson={exportJson}
+    <div style={ui.page} onContextMenu={handleContextMenu}>
+      <TopBar
+        renderMode={renderMode}
+        masksCount={masks.length}
+        backendStatus={backendStatus}
+        onOpenOutput={openOutput}
       />
-
-      <div style={styles.modeBar}>
-        <span style={styles.modeLabel}>Tryb podglądu:</span>
-
-        <button
-          style={{
-            ...styles.modeBtn,
-            ...(renderMode === "plane" ? styles.modeBtnActive : null)
-          }}
-          onClick={() => setRenderMode("plane")}
-          type="button"
-        >
-          PLANE (test + warp)
-        </button>
-
-        <button
-          style={{
-            ...styles.modeBtn,
-            ...(renderMode === "glb" ? styles.modeBtnActive : null)
-          }}
-          onClick={() => setRenderMode("glb")}
-          type="button"
-        >
-          GLB (UV z Blendera)
-        </button>
-
-        <span style={styles.modeHint}>
-          Model: <code>{MODEL_URL}</code>
-        </span>
-      </div>
 
       <ProjectionTexture
         wallW={WALL_W}
@@ -285,24 +264,58 @@ export default function ModelPage() {
         onTexture={setProjectionTexture}
       />
 
-      <div style={styles.main}>
-        <div style={styles.left}>
-          <MaskList
-            masks={masks}
-            selectedMaskId={selectedMaskId}
-            onSelect={handleSelectMask}
-            onDelete={deleteMask}
-          />
+      <div style={ui.shell}>
+        <div style={ui.sidebar}>
+          <SidebarPanel title="Mask editor">
+            <Toolbar
+              mode={mode}
+              setMode={setMode}
+              showGrid={showGrid}
+              setShowGrid={setShowGrid}
+              opacity={opacity}
+              setOpacity={setOpacity}
+              maskName={maskName}
+              setMaskName={setMaskName}
+              maskType={maskType}
+              setMaskType={setMaskType}
+              canSaveNew={canSaveNew}
+              canUpdate={canUpdate}
+              onSaveNew={saveNew}
+              onUpdate={updateSelected}
+              onReset={resetDraft}
+              onExportJson={exportJson}
+            />
+          </SidebarPanel>
 
-          <div style={styles.tip}>
-            Demo: projekcja + maski. Tryb <b>PLANE</b> jest do testów i warpa. Tryb <b>GLB</b> zadziała,
-            gdy w repo będzie <code>public/models/fasada.glb</code> z UV.
-          </div>
+          <SidebarPanel title="Saved masks">
+            <MaskList
+              masks={masks}
+              selectedMaskId={selectedMaskId}
+              onSelect={handleSelectMask}
+              onDelete={deleteMask}
+            />
+          </SidebarPanel>
         </div>
 
-        <div style={styles.center}>
-          <div style={styles.block}>
-            <div style={styles.blockTitle}>Podgląd 3D</div>
+        <div style={ui.center}>
+          <SidebarPanel title="3D preview">
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button
+                style={renderMode === "plane" ? ui.buttonPrimary : ui.button}
+                onClick={() => setRenderMode("plane")}
+                type="button"
+              >
+                Plane
+              </button>
+
+              <button
+                style={renderMode === "glb" ? ui.buttonPrimary : ui.button}
+                onClick={() => setRenderMode("glb")}
+                type="button"
+              >
+                GLB
+              </button>
+            </div>
 
             <WallScene
               renderMode={renderMode}
@@ -314,11 +327,11 @@ export default function ModelPage() {
               wallW={WALL_W}
               wallH={WALL_H}
               projectionTexture={projectionTexture}
-            />
-          </div>
+              projector={projector}
+/>
+          </SidebarPanel>
 
-          <div style={styles.block}>
-            <div style={styles.blockTitle}>Edytor 2D (rysowanie i kalibracja maski)</div>
+          <SidebarPanel title="2D editor">
             <CanvasEditor
               mode={mode}
               setMode={setMode}
@@ -331,91 +344,35 @@ export default function ModelPage() {
               wallW={WALL_W}
               wallH={WALL_H}
             />
-          </div>
+          </SidebarPanel>
+        </div>
+
+        <div style={ui.sidebar}>
+          <SidebarPanel title="Projector settings">
+            <ProjectorSettings
+              projector={projector}
+              setProjector={setProjector}
+            />
+          </SidebarPanel>
+
+          <SidebarPanel title="Warp / Keystone">
+            <WarpEditor
+                warp={warp}
+                setWarp={setWarp}
+                wallW={300}
+                wallH={220}
+            />
+          </SidebarPanel>
         </div>
       </div>
+
+      <BottomStatusBar
+        selectedMaskId={selectedMaskId}
+        pointsCount={points.length}
+        isClosed={isClosed}
+        showGrid={showGrid}
+        mode={mode}
+      />
     </div>
   );
 }
-
-const styles = {
-  page: {
-    padding: 24,
-    fontFamily: "sans-serif",
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
-    background: "#fafafa",
-    minHeight: "100vh"
-  },
-  modeBar: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    background: "#fff",
-    border: "1px solid #eee",
-    borderRadius: 10,
-    padding: 10
-  },
-  modeLabel: {
-    fontSize: 13,
-    color: "#444",
-    fontWeight: 600
-  },
-  modeBtn: {
-    border: "1px solid #ddd",
-    background: "#f7f7f7",
-    padding: "8px 10px",
-    borderRadius: 8,
-    cursor: "pointer",
-    fontSize: 13
-  },
-  modeBtnActive: {
-    background: "#e9f0ff",
-    border: "1px solid #9db9ff"
-  },
-  modeHint: {
-    marginLeft: "auto",
-    fontSize: 12,
-    color: "#666"
-  },
-  main: {
-    display: "flex",
-    gap: 16,
-    alignItems: "flex-start"
-  },
-  left: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 12,
-    width: 360
-  },
-  center: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
-    flex: 1
-  },
-  block: {
-    background: "#fff",
-    border: "1px solid #eee",
-    borderRadius: 10,
-    padding: 12,
-    display: "flex",
-    flexDirection: "column",
-    gap: 10
-  },
-  blockTitle: {
-    fontSize: 13,
-    color: "#444",
-    fontWeight: 600
-  },
-  tip: {
-    border: "1px solid #eee",
-    borderRadius: 8,
-    background: "#fff",
-    padding: 12,
-    color: "#444",
-    fontSize: 13
-  }
-};

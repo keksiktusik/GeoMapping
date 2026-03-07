@@ -1,68 +1,64 @@
-export default function MaskList({ masks, selectedMaskId, onSelect, onDelete }) {
+import { ui } from "../styles/ui";
+
+export default function MaskList({
+  masks,
+  selectedMaskId,
+  onSelect,
+  onDelete,
+}) {
+  if (masks.length === 0) {
+    return <div style={ui.small}>Brak zapisanych masek</div>;
+  }
+
   return (
-    <div style={styles.box}>
-      <div style={styles.header}>Saved masks</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {masks.map((m) => {
+        const active = m.id === selectedMaskId;
 
-      {masks.length === 0 ? (
-        <div style={styles.empty}>Brak zapisanych masek</div>
-      ) : (
-        <ul style={styles.list}>
-          {masks.map((m) => {
-            const active = m.id === selectedMaskId;
-            return (
-              <li
-                key={m.id}
-                style={{ ...styles.item, ...(active ? styles.active : {}) }}
-                onClick={() => onSelect(m.id)}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                  <div>
-                    <div style={{ fontWeight: 700 }}>{m.name}</div>
-                    <div style={{ fontSize: 12, color: "#555" }}>
-                      {m.type} • points: {m.points.length} • opacity: {m.opacity.toFixed(2)}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(m.id);
-                    }}
-                  >
-                    Delete
-                  </button>
+        return (
+          <div
+            key={m.id}
+            onClick={() => onSelect(m.id)}
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: active ? "1px solid #38bdf8" : "1px solid #243041",
+              background: active ? "#0b1220" : "#111827",
+              cursor: "pointer",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 10,
+                alignItems: "start",
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 800 }}>{m.name}</div>
+                <div style={ui.small}>
+                  type: {m.type} • points: {m.points?.length || 0}
                 </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                <div style={ui.small}>
+                  opacity: {typeof m.opacity === "number" ? m.opacity.toFixed(2) : "1.00"}
+                </div>
+              </div>
+
+              <button
+                style={ui.buttonDanger}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(m.id);
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
-
-const styles = {
-  box: {
-    width: 340,
-    border: "1px solid #ddd",
-    borderRadius: 8,
-    background: "#fff",
-    overflow: "hidden"
-  },
-  header: {
-    padding: 12,
-    fontWeight: 800,
-    borderBottom: "1px solid #eee",
-    background: "#fafafa"
-  },
-  empty: { padding: 12, color: "#666" },
-  list: { listStyle: "none", margin: 0, padding: 0 },
-  item: {
-    padding: 12,
-    borderBottom: "1px solid #eee",
-    cursor: "pointer"
-  },
-  active: {
-    background: "#eef5ff"
-  }
-};

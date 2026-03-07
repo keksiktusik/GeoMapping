@@ -214,8 +214,10 @@ export default function CanvasEditor({
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
       style={{
-        border: "1px solid #ccc",
-        background: "white",
+        border: "1px solid #243041",
+        borderRadius: 12,
+        background: "#ffffff",
+        maxWidth: "100%",
         cursor: mode === "draw" ? "crosshair" : dragIndex !== null ? "grabbing" : "grab"
       }}
     />
