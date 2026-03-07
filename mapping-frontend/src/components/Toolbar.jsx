@@ -1,3 +1,5 @@
+import { ui } from "../styles/ui";
+
 export default function Toolbar({
   mode,
   setMode,
@@ -7,26 +9,67 @@ export default function Toolbar({
   setOpacity,
   maskName,
   setMaskName,
+  maskType,
+  setMaskType,
   canSaveNew,
   canUpdate,
   onSaveNew,
   onUpdate,
   onReset,
-  onExportJson
+  onExportJson,
 }) {
   return (
-    <div style={styles.bar}>
-      <button onClick={() => setMode(mode === "draw" ? "edit" : "draw")}>
-        Mode: {mode.toUpperCase()}
-      </button>
-
-      <button onClick={() => setShowGrid(!showGrid)}>
-        Test Grid: {showGrid ? "ON" : "OFF"}
-      </button>
-
-      <label style={styles.label}>
-        Opacity
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div>
+        <div style={ui.label}>Mask name</div>
         <input
+          style={ui.input}
+          value={maskName}
+          onChange={(e) => setMaskName(e.target.value)}
+          placeholder="np. Left Window"
+        />
+      </div>
+
+      <div>
+        <div style={ui.label}>Mask type</div>
+        <select
+          style={ui.input}
+          value={maskType}
+          onChange={(e) => setMaskType(e.target.value)}
+        >
+          <option value="window">window</option>
+          <option value="door">door</option>
+          <option value="balcony">balcony</option>
+          <option value="ignore-zone">ignore-zone</option>
+          <option value="projection-zone">projection-zone</option>
+        </select>
+      </div>
+
+      <div>
+        <div style={ui.label}>Editor mode</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            style={mode === "draw" ? ui.buttonPrimary : ui.button}
+            onClick={() => setMode("draw")}
+            type="button"
+          >
+            Draw
+          </button>
+
+          <button
+            style={mode === "edit" ? ui.buttonPrimary : ui.button}
+            onClick={() => setMode("edit")}
+            type="button"
+          >
+            Edit
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <div style={ui.label}>Opacity: {opacity.toFixed(2)}</div>
+        <input
+          style={{ width: "100%" }}
           type="range"
           min="0.05"
           max="1"
@@ -34,47 +77,36 @@ export default function Toolbar({
           value={opacity}
           onChange={(e) => setOpacity(parseFloat(e.target.value))}
         />
-        <span style={{ width: 44, textAlign: "right" }}>{opacity.toFixed(2)}</span>
-      </label>
+      </div>
 
-      <label style={styles.label}>
-        Nazwa
-        <input
-          value={maskName}
-          onChange={(e) => setMaskName(e.target.value)}
-          placeholder="np. Okno lewe"
-          style={styles.input}
-        />
-      </label>
+      <div>
+        <div style={ui.label}>Helpers</div>
+        <button
+          style={showGrid ? ui.buttonPrimary : ui.button}
+          onClick={() => setShowGrid(!showGrid)}
+          type="button"
+        >
+          Test Grid: {showGrid ? "ON" : "OFF"}
+        </button>
+      </div>
 
-      <button onClick={onSaveNew} disabled={!canSaveNew}>
-        Save new
-      </button>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <button style={ui.buttonPrimary} onClick={onSaveNew} disabled={!canSaveNew}>
+          Save new
+        </button>
 
-      <button onClick={onUpdate} disabled={!canUpdate}>
-        Update
-      </button>
+        <button style={ui.button} onClick={onUpdate} disabled={!canUpdate}>
+          Update
+        </button>
 
-      <button onClick={onExportJson} disabled={!canSaveNew && !canUpdate}>
-        Export JSON
-      </button>
+        <button style={ui.button} onClick={onExportJson}>
+          Export JSON
+        </button>
 
-      <button onClick={onReset}>Reset</button>
+        <button style={ui.buttonDanger} onClick={onReset}>
+          Reset
+        </button>
+      </div>
     </div>
   );
 }
-
-const styles = {
-  bar: {
-    display: "flex",
-    gap: 12,
-    alignItems: "center",
-    flexWrap: "wrap",
-    padding: 12,
-    border: "1px solid #ddd",
-    borderRadius: 8,
-    background: "#fff"
-  },
-  label: { display: "flex", gap: 8, alignItems: "center" },
-  input: { padding: "6px 8px", border: "1px solid #ccc", borderRadius: 6 }
-};
