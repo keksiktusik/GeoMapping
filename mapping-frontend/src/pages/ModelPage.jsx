@@ -51,13 +51,14 @@ export default function ModelPage() {
 
   // projector settings
   const [projector, setProjector] = useState({
-    distance: 2.5,
-    offsetX: 0,
-    offsetY: 0,
-    angleX: 0,
-    angleY: 0,
-    angleZ: 0
-  });
+  distance: 2.5,
+  offsetX: 0,
+  offsetY: 0,
+  angleX: 0,
+  angleY: 0,
+  angleZ: 0,
+  fov: 45
+});
 
   // mask data
   const [maskName, setMaskName] = useState("");
@@ -212,17 +213,19 @@ export default function ModelPage() {
 
     try {
       localStorage.setItem(
-        STORAGE_OUTPUT,
-        JSON.stringify({
-          points,
-          isClosed,
-          opacity,
-          showGrid,
-          masks,
-          warp,
-          projector
-        })
-      );
+  STORAGE_OUTPUT,
+  JSON.stringify({
+    points,
+    isClosed,
+    opacity,
+    showGrid,
+    masks,
+    warp,
+    projector,
+    renderMode
+  })
+
+)
     } catch {
       // ignore
     }
@@ -328,7 +331,7 @@ export default function ModelPage() {
               wallH={WALL_H}
               projectionTexture={projectionTexture}
               projector={projector}
-/>
+            />
           </SidebarPanel>
 
           <SidebarPanel title="2D editor">
@@ -357,10 +360,10 @@ export default function ModelPage() {
 
           <SidebarPanel title="Warp / Keystone">
             <WarpEditor
-                warp={warp}
-                setWarp={setWarp}
-                wallW={300}
-                wallH={220}
+              warp={warp}
+              setWarp={setWarp}
+              wallW={300}
+              wallH={220}
             />
           </SidebarPanel>
         </div>
