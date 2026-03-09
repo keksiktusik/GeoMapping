@@ -1,31 +1,155 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
-function drawPolygonFill(ctx, pts, alpha) {
-  if (!pts || pts.length < 3) return;
+function createBuffer(w, h) {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  return { canvas, ctx };
+}
 
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = "black";
+function drawPolygonPath(ctx, pts) {
+  if (!pts || pts.length < 3) return false;
+
   ctx.beginPath();
   ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  for (let i = 1; i < pts.length; i += 1) {
+    ctx.lineTo(pts[i].x, pts[i].y);
+  }
   ctx.closePath();
-  ctx.fill();
-  ctx.restore();
+  return true;
 }
 
 function drawPolygonStroke(ctx, pts) {
   if (!pts || pts.length < 2) return;
 
   ctx.save();
-  ctx.globalAlpha = 0.9;
+  ctx.globalAlpha = 0.95;
   ctx.strokeStyle = "rgba(0,0,255,0.9)";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  for (let i = 1; i < pts.length; i += 1) {
+    ctx.lineTo(pts[i].x, pts[i].y);
+  }
   ctx.stroke();
+  ctx.restore();
+}
+
+function renderShapeAlpha(shape, wallW, wallH) {
+  const { canvas, ctx } = createBuffer(wallW, wallH);
+
+  if (!drawPolygonPath(ctx, shape.points)) {
+    return canvas;
+  }
+
+  const alpha = typeof shape.opacity === "number" ? shape.opacity : 1;
+
+  ctx.save();
+  ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+  ctx.fill();
+  ctx.restore();
+
+  return canvas;
+}
+
+function applyShapeToMask(maskCanvas, shapeCanvas, operation, wallW, wallH) {
+  const maskCtx = maskCanvas.getContext("2d");
+
+  if (operation === "subtract") {
+    maskCtx.save();
+    maskCtx.globalCompositeOperation = "destination-out";
+    maskCtx.drawImage(shapeCanvas, 0, 0);
+    maskCtx.restore();
+    return;
+  }
+
+  if (operation === "intersect") {
+    const { canvas: temp, ctx: tempCtx } = createBuffer(wallW, wallH);
+
+    tempCtx.drawImage(maskCanvas, 0, 0);
+    tempCtx.globalCompositeOperation = "destination-in";
+    tempCtx.drawImage(shapeCanvas, 0, 0);
+
+    maskCtx.clearRect(0, 0, wallW, wallH);
+    maskCtx.drawImage(temp, 0, 0);
+    return;
+  }
+
+  maskCtx.save();
+  maskCtx.globalCompositeOperation = "source-over";
+  maskCtx.drawImage(shapeCanvas, 0, 0);
+  maskCtx.restore();
+}
+
+function buildCompositeMask({ wallW, wallH, masks = [], activeDraft = null }) {
+  const { canvas: maskCanvas, ctx: maskCtx } = createBuffer(wallW, wallH);
+  maskCtx.clearRect(0, 0, wallW, wallH);
+
+  const allShapes = [...masks];
+
+  if (
+    activeDraft?.isClosed &&
+    Array.isArray(activeDraft?.points) &&
+    activeDraft.points.length >= 3 &&
+    activeDraft.visible !== false
+  ) {
+    allShapes.push({
+      id: "__draft__",
+      name: activeDraft.name || "draft",
+      type: activeDraft.type || "polygon",
+      operation: activeDraft.operation || "add",
+      zIndex: typeof activeDraft.zIndex === "number" ? activeDraft.zIndex : 999999,
+      visible: activeDraft.visible,
+      opacity: typeof activeDraft.opacity === "number" ? activeDraft.opacity : 1,
+      points: activeDraft.points
+    });
+  }
+
+  const orderedShapes = allShapes
+    .filter((shape) => shape?.visible !== false)
+    .filter((shape) => Array.isArray(shape?.points) && shape.points.length >= 3)
+    .sort((a, b) => {
+      const az = typeof a.zIndex === "number" ? a.zIndex : 0;
+      const bz = typeof b.zIndex === "number" ? b.zIndex : 0;
+      return az - bz;
+    });
+
+  for (const shape of orderedShapes) {
+    const shapeCanvas = renderShapeAlpha(shape, wallW, wallH);
+    applyShapeToMask(
+      maskCanvas,
+      shapeCanvas,
+      shape.operation || "add",
+      wallW,
+      wallH
+    );
+  }
+
+  return maskCanvas;
+}
+
+function drawGrid(ctx, wallW, wallH) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,0,0,0.35)";
+  ctx.lineWidth = 1;
+  const step = 50;
+
+  for (let x = 0; x <= wallW; x += step) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, wallH);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y <= wallH; y += step) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(wallW, y);
+    ctx.stroke();
+  }
+
   ctx.restore();
 }
 
@@ -34,14 +158,11 @@ export default function ProjectionTexture({
   wallH = 500,
   showGrid = false,
   masks = [],
-  activePoints = [],
-  opacity = 0.35,
+  activeDraft = null,
   imageUrl = "/projection.jpg",
   onTexture
 }) {
   const canvasRef = useRef(document.createElement("canvas"));
-
-  // Cache obrazka (żeby nie robić Image() w kółko)
   const imgRef = useRef(null);
   const imgLoadedRef = useRef(false);
 
@@ -55,15 +176,12 @@ export default function ProjectionTexture({
   }, []);
 
   useEffect(() => {
-    // init image cache
     const img = new Image();
     imgRef.current = img;
     imgLoadedRef.current = false;
 
     const handleLoad = () => {
       imgLoadedRef.current = true;
-      // po wczytaniu i tak narysujemy w kolejnym useEffect
-      // (trigger nastąpi, bo imageUrl jest w deps)
     };
 
     const handleError = () => {
@@ -87,8 +205,6 @@ export default function ProjectionTexture({
     canvas.height = wallH;
 
     const ctx = canvas.getContext("2d");
-
-    // --- 1) tło ---
     ctx.clearRect(0, 0, wallW, wallH);
 
     const img = imgRef.current;
@@ -97,56 +213,33 @@ export default function ProjectionTexture({
     if (img && loaded) {
       ctx.drawImage(img, 0, 0, wallW, wallH);
     } else {
-      // fallback tło gdy obraz jeszcze się ładuje / nie działa
       ctx.fillStyle = "#f5f5f5";
       ctx.fillRect(0, 0, wallW, wallH);
     }
 
-    // --- 2) grid (kalibracja) ---
     if (showGrid) {
-      ctx.save();
-      ctx.strokeStyle = "rgba(255,0,0,0.35)";
-      ctx.lineWidth = 1;
-      const step = 50;
-
-      for (let x = 0; x <= wallW; x += step) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, wallH);
-        ctx.stroke();
-      }
-
-      for (let y = 0; y <= wallH; y += step) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(wallW, y);
-        ctx.stroke();
-      }
-
-      ctx.restore();
+      drawGrid(ctx, wallW, wallH);
     }
 
-    // --- 3) zapisane maski (blackout) ---
-    for (const m of masks) {
-      if (!m?.points || m.points.length < 3) continue;
-      const a = typeof m.opacity === "number" ? m.opacity : 0.35;
-      drawPolygonFill(ctx, m.points, a);
+    const compositeMask = buildCompositeMask({
+      wallW,
+      wallH,
+      masks,
+      activeDraft
+    });
+
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.drawImage(compositeMask, 0, 0);
+    ctx.restore();
+
+    if (activeDraft?.points && activeDraft.points.length >= 2) {
+      drawPolygonStroke(ctx, activeDraft.points);
     }
 
-    // --- 4) aktywna maska (podgląd) ---
-    // fill dopiero gdy mamy >=3 punkty
-    if (activePoints && activePoints.length >= 3) {
-      drawPolygonFill(ctx, activePoints, opacity);
-    }
-    // kontur pokazujemy już od 2 punktów (żeby w draw było widać co rysujesz)
-    if (activePoints && activePoints.length >= 2) {
-      drawPolygonStroke(ctx, activePoints);
-    }
-
-    // --- update tekstury ---
     texture.needsUpdate = true;
     onTexture?.(texture);
-  }, [wallW, wallH, showGrid, masks, activePoints, opacity, texture, onTexture]);
+  }, [wallW, wallH, showGrid, masks, activeDraft, texture, onTexture]);
 
   return null;
 }

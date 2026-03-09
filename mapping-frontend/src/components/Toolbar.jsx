@@ -11,12 +11,22 @@ export default function Toolbar({
   setMaskName,
   maskType,
   setMaskType,
+  operation,
+  setOperation,
+  zIndex,
+  setZIndex,
+  visible,
+  setVisible,
+  locked,
+  setLocked,
+  layerName,
+  setLayerName,
   canSaveNew,
   canUpdate,
   onSaveNew,
   onUpdate,
   onReset,
-  onExportJson,
+  onExportJson
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -43,6 +53,39 @@ export default function Toolbar({
           <option value="ignore-zone">ignore-zone</option>
           <option value="projection-zone">projection-zone</option>
         </select>
+      </div>
+
+      <div>
+        <div style={ui.label}>Operation</div>
+        <select
+          style={ui.input}
+          value={operation}
+          onChange={(e) => setOperation(e.target.value)}
+        >
+          <option value="add">add</option>
+          <option value="subtract">subtract</option>
+          <option value="intersect">intersect</option>
+        </select>
+      </div>
+
+      <div>
+        <div style={ui.label}>Layer name</div>
+        <input
+          style={ui.input}
+          value={layerName}
+          onChange={(e) => setLayerName(e.target.value)}
+          placeholder="np. facade-base"
+        />
+      </div>
+
+      <div>
+        <div style={ui.label}>Z-index</div>
+        <input
+          style={ui.input}
+          type="number"
+          value={zIndex}
+          onChange={(e) => setZIndex(parseInt(e.target.value || "0", 10))}
+        />
       </div>
 
       <div>
@@ -90,20 +133,59 @@ export default function Toolbar({
         </button>
       </div>
 
+      <div>
+        <div style={ui.label}>Layer state</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            style={visible ? ui.buttonPrimary : ui.button}
+            onClick={() => setVisible(!visible)}
+          >
+            Visible: {visible ? "ON" : "OFF"}
+          </button>
+
+          <button
+            type="button"
+            style={locked ? ui.buttonPrimary : ui.button}
+            onClick={() => setLocked(!locked)}
+          >
+            Locked: {locked ? "ON" : "OFF"}
+          </button>
+        </div>
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <button style={ui.buttonPrimary} onClick={onSaveNew} disabled={!canSaveNew}>
+        <button
+          style={ui.buttonPrimary}
+          onClick={onSaveNew}
+          disabled={!canSaveNew}
+          type="button"
+        >
           Save new
         </button>
 
-        <button style={ui.button} onClick={onUpdate} disabled={!canUpdate}>
+        <button
+          style={ui.button}
+          onClick={onUpdate}
+          disabled={!canUpdate}
+          type="button"
+        >
           Update
         </button>
 
-        <button style={ui.button} onClick={onExportJson}>
+        <button
+          style={ui.button}
+          onClick={onExportJson}
+          type="button"
+        >
           Export JSON
         </button>
 
-        <button style={ui.buttonDanger} onClick={onReset}>
+        <button
+          style={ui.buttonDanger}
+          onClick={onReset}
+          type="button"
+        >
           Reset
         </button>
       </div>

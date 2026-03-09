@@ -39,20 +39,23 @@ const pointSchema = z.object({
   y: z.number()
 });
 
-const maskCreateSchema = z.object({
-  modelId: z.number().int().positive().default(1),
+const maskBaseSchema = z.object({
   name: z.string().trim().min(1).max(255),
   type: z.string().trim().min(1).max(50).default("polygon"),
+  operation: z.enum(["add", "subtract", "intersect"]).default("add"),
+  zIndex: z.number().int().min(-9999).max(9999).default(0),
+  visible: z.boolean().default(true),
+  locked: z.boolean().default(false),
+  layerName: z.string().trim().min(1).max(100).default("default"),
   opacity: z.number().min(0).max(1),
   points: z.array(pointSchema).min(3)
 });
 
-const maskUpdateSchema = z.object({
-  name: z.string().trim().min(1).max(255),
-  type: z.string().trim().min(1).max(50).default("polygon"),
-  opacity: z.number().min(0).max(1),
-  points: z.array(pointSchema).min(3)
+const maskCreateSchema = maskBaseSchema.extend({
+  modelId: z.number().int().positive().default(1)
 });
+
+const maskUpdateSchema = maskBaseSchema;
 
 let pool;
 
@@ -97,7 +100,21 @@ app.get("/masks", async (req, res, next) => {
     const modelId = Number(req.query.modelId || 1);
 
     const [rows] = await pool.query(
-      "SELECT id, modelId, name, type, opacity, points_json FROM masks WHERE modelId=? ORDER BY created_at DESC",
+      `SELECT
+        id,
+        modelId,
+        name,
+        type,
+        operation,
+        z_index,
+        visible,
+        locked,
+        layer_name,
+        opacity,
+        points_json
+      FROM masks
+      WHERE modelId=?
+      ORDER BY z_index ASC, created_at DESC`,
       [modelId]
     );
 
@@ -107,6 +124,11 @@ app.get("/masks", async (req, res, next) => {
         modelId: Number(r.modelId),
         name: r.name,
         type: r.type,
+        operation: r.operation,
+        zIndex: Number(r.z_index),
+        visible: Boolean(r.visible),
+        locked: Boolean(r.locked),
+        layerName: r.layer_name,
         opacity: Number(r.opacity),
         points: r.points_json
       }))
@@ -127,11 +149,35 @@ app.post("/masks", async (req, res, next) => {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
 
-    const { modelId, name, type, opacity, points } = parsed.data;
+    const {
+      modelId,
+      name,
+      type,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
+      opacity,
+      points
+    } = parsed.data;
 
     const [result] = await pool.query(
-      "INSERT INTO masks (modelId, name, type, opacity, points_json) VALUES (?,?,?,?,?)",
-      [modelId, name, type, opacity, JSON.stringify(points)]
+      `INSERT INTO masks
+        (modelId, name, type, operation, z_index, visible, locked, layer_name, opacity, points_json)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [
+        modelId,
+        name,
+        type,
+        operation,
+        zIndex,
+        visible ? 1 : 0,
+        locked ? 1 : 0,
+        layerName,
+        opacity,
+        JSON.stringify(points)
+      ]
     );
 
     res.status(201).json({
@@ -139,6 +185,11 @@ app.post("/masks", async (req, res, next) => {
       modelId,
       name,
       type,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
       opacity,
       points
     });
@@ -159,11 +210,43 @@ app.patch("/masks/:id", async (req, res, next) => {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
 
-    const { name, type, opacity, points } = parsed.data;
+    const {
+      name,
+      type,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
+      opacity,
+      points
+    } = parsed.data;
 
     const [result] = await pool.query(
-      "UPDATE masks SET name=?, type=?, opacity=?, points_json=? WHERE id=?",
-      [name, type, opacity, JSON.stringify(points), id]
+      `UPDATE masks
+       SET
+         name=?,
+         type=?,
+         operation=?,
+         z_index=?,
+         visible=?,
+         locked=?,
+         layer_name=?,
+         opacity=?,
+         points_json=?
+       WHERE id=?`,
+      [
+        name,
+        type,
+        operation,
+        zIndex,
+        visible ? 1 : 0,
+        locked ? 1 : 0,
+        layerName,
+        opacity,
+        JSON.stringify(points),
+        id
+      ]
     );
 
     if (result.affectedRows === 0) {
@@ -171,7 +254,20 @@ app.patch("/masks/:id", async (req, res, next) => {
     }
 
     const [rows] = await pool.query(
-      "SELECT id, modelId, name, type, opacity, points_json FROM masks WHERE id=?",
+      `SELECT
+        id,
+        modelId,
+        name,
+        type,
+        operation,
+        z_index,
+        visible,
+        locked,
+        layer_name,
+        opacity,
+        points_json
+      FROM masks
+      WHERE id=?`,
       [id]
     );
 
@@ -182,6 +278,11 @@ app.patch("/masks/:id", async (req, res, next) => {
       modelId: Number(row.modelId),
       name: row.name,
       type: row.type,
+      operation: row.operation,
+      zIndex: Number(row.z_index),
+      visible: Boolean(row.visible),
+      locked: Boolean(row.locked),
+      layerName: row.layer_name,
       opacity: Number(row.opacity),
       points: row.points_json
     });

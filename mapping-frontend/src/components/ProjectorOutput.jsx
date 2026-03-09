@@ -13,6 +13,18 @@ function getDefaultState() {
     opacity: 1,
     showGrid: false,
     masks: [],
+    draft: {
+      name: "",
+      type: "polygon",
+      operation: "add",
+      zIndex: 999999,
+      visible: true,
+      locked: false,
+      layerName: "default",
+      points: [],
+      opacity: 1,
+      isClosed: false
+    },
     warp: {
       tl: { x: 0, y: 0 },
       tr: { x: 800, y: 0 },
@@ -44,13 +56,149 @@ function degToRad(v) {
   return THREE.MathUtils.degToRad(Number(v || 0));
 }
 
+function createBuffer(w, h) {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  return { canvas, ctx };
+}
+
+function drawPolygonPath(ctx, pts) {
+  if (!pts || pts.length < 3) return false;
+
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i += 1) {
+    ctx.lineTo(pts[i].x, pts[i].y);
+  }
+  ctx.closePath();
+  return true;
+}
+
+function renderShapeAlpha(shape, wallW, wallH) {
+  const { canvas, ctx } = createBuffer(wallW, wallH);
+
+  if (!drawPolygonPath(ctx, shape.points)) {
+    return canvas;
+  }
+
+  const alpha = typeof shape.opacity === "number" ? shape.opacity : 1;
+
+  ctx.save();
+  ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+  ctx.fill();
+  ctx.restore();
+
+  return canvas;
+}
+
+function applyShapeToMask(maskCanvas, shapeCanvas, operation, wallW, wallH) {
+  const maskCtx = maskCanvas.getContext("2d");
+
+  if (operation === "subtract") {
+    maskCtx.save();
+    maskCtx.globalCompositeOperation = "destination-out";
+    maskCtx.drawImage(shapeCanvas, 0, 0);
+    maskCtx.restore();
+    return;
+  }
+
+  if (operation === "intersect") {
+    const { canvas: temp, ctx: tempCtx } = createBuffer(wallW, wallH);
+
+    tempCtx.drawImage(maskCanvas, 0, 0);
+    tempCtx.globalCompositeOperation = "destination-in";
+    tempCtx.drawImage(shapeCanvas, 0, 0);
+
+    maskCtx.clearRect(0, 0, wallW, wallH);
+    maskCtx.drawImage(temp, 0, 0);
+    return;
+  }
+
+  maskCtx.save();
+  maskCtx.globalCompositeOperation = "source-over";
+  maskCtx.drawImage(shapeCanvas, 0, 0);
+  maskCtx.restore();
+}
+
+function buildCompositeMask({ wallW, wallH, masks = [], activeDraft = null }) {
+  const { canvas: maskCanvas, ctx: maskCtx } = createBuffer(wallW, wallH);
+  maskCtx.clearRect(0, 0, wallW, wallH);
+
+  const allShapes = [...masks];
+
+  if (
+    activeDraft?.isClosed &&
+    Array.isArray(activeDraft?.points) &&
+    activeDraft.points.length >= 3 &&
+    activeDraft.visible !== false
+  ) {
+    allShapes.push({
+      id: "__draft__",
+      name: activeDraft.name || "draft",
+      type: activeDraft.type || "polygon",
+      operation: activeDraft.operation || "add",
+      zIndex:
+        typeof activeDraft.zIndex === "number" ? activeDraft.zIndex : 999999,
+      visible: activeDraft.visible,
+      opacity: typeof activeDraft.opacity === "number" ? activeDraft.opacity : 1,
+      points: activeDraft.points
+    });
+  }
+
+  const orderedShapes = allShapes
+    .filter((shape) => shape?.visible !== false)
+    .filter((shape) => Array.isArray(shape?.points) && shape.points.length >= 3)
+    .sort((a, b) => {
+      const az = typeof a.zIndex === "number" ? a.zIndex : 0;
+      const bz = typeof b.zIndex === "number" ? b.zIndex : 0;
+      return az - bz;
+    });
+
+  for (const shape of orderedShapes) {
+    const shapeCanvas = renderShapeAlpha(shape, wallW, wallH);
+    applyShapeToMask(
+      maskCanvas,
+      shapeCanvas,
+      shape.operation || "add",
+      wallW,
+      wallH
+    );
+  }
+
+  return maskCanvas;
+}
+
+function drawGrid(ctx, wallW, wallH) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.lineWidth = 1;
+  const step = 40;
+
+  for (let x = 0; x <= wallW; x += step) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, wallH);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y <= wallH; y += step) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(wallW, y);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 function buildProjectionTexture({
   wallW,
   wallH,
   showGrid,
   masks,
-  points,
-  opacity
+  activeDraft
 }) {
   const canvas = document.createElement("canvas");
   canvas.width = wallW;
@@ -65,72 +213,20 @@ function buildProjectionTexture({
   ctx.fillRect(0, 0, wallW, wallH);
 
   if (showGrid) {
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = 1;
-    const step = 40;
-
-    for (let x = 0; x <= wallW; x += step) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, wallH);
-      ctx.stroke();
-    }
-
-    for (let y = 0; y <= wallH; y += step) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(wallW, y);
-      ctx.stroke();
-    }
-
-    ctx.restore();
+    drawGrid(ctx, wallW, wallH);
   }
 
-  if (Array.isArray(masks)) {
-    for (const mask of masks) {
-      if (!Array.isArray(mask?.points) || mask.points.length < 3) continue;
+  const compositeMask = buildCompositeMask({
+    wallW,
+    wallH,
+    masks,
+    activeDraft
+  });
 
-      const alpha =
-        typeof mask.opacity === "number" ? mask.opacity : opacity ?? 1;
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(mask.points[0].x, mask.points[0].y);
-
-      for (let i = 1; i < mask.points.length; i += 1) {
-        ctx.lineTo(mask.points[i].x, mask.points[i].y);
-      }
-
-      ctx.closePath();
-      ctx.fillStyle = `rgba(0,0,0,${alpha})`;
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(255,255,255,0.9)";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
-
-  if (Array.isArray(points) && points.length >= 3) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-
-    for (let i = 1; i < points.length; i += 1) {
-      ctx.lineTo(points[i].x, points[i].y);
-    }
-
-    ctx.closePath();
-    ctx.fillStyle = `rgba(0,0,0,${opacity ?? 1})`;
-    ctx.fill();
-
-    ctx.strokeStyle = "rgba(0,0,255,0.9)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.restore();
-  }
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(compositeMask, 0, 0);
+  ctx.restore();
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
@@ -567,6 +663,21 @@ function OutputPipeline({ state, wallW, wallH }) {
   const desiredScene = useMemo(() => new THREE.Scene(), []);
   const compensationScene = useMemo(() => new THREE.Scene(), []);
 
+  const activeDraft = useMemo(() => {
+    if (state?.draft) {
+      return state.draft;
+    }
+
+    return {
+      points: state.points || [],
+      opacity: typeof state.opacity === "number" ? state.opacity : 1,
+      operation: "add",
+      zIndex: 999999,
+      visible: true,
+      isClosed: Boolean(state.isClosed)
+    };
+  }, [state]);
+
   const projectionTexture = useMemo(
     () =>
       buildProjectionTexture({
@@ -574,10 +685,9 @@ function OutputPipeline({ state, wallW, wallH }) {
         wallH,
         showGrid: state.showGrid,
         masks: state.masks,
-        points: state.points,
-        opacity: state.opacity
+        activeDraft
       }),
-    [wallW, wallH, state.showGrid, state.masks, state.points, state.opacity]
+    [wallW, wallH, state.showGrid, state.masks, activeDraft]
   );
 
   const aspect = wallW / wallH;
