@@ -4,7 +4,7 @@ export default function MaskList({
   masks,
   selectedMaskId,
   onSelect,
-  onDelete,
+  onDelete
 }) {
   if (masks.length === 0) {
     return <div style={ui.small}>Brak zapisanych masek</div>;
@@ -24,7 +24,7 @@ export default function MaskList({
               borderRadius: 12,
               border: active ? "1px solid #38bdf8" : "1px solid #243041",
               background: active ? "#0b1220" : "#111827",
-              cursor: "pointer",
+              cursor: "pointer"
             }}
           >
             <div
@@ -32,16 +32,24 @@ export default function MaskList({
                 display: "flex",
                 justifyContent: "space-between",
                 gap: 10,
-                alignItems: "start",
+                alignItems: "start"
               }}
             >
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 800 }}>{m.name}</div>
+
                 <div style={ui.small}>
-                  type: {m.type} • points: {m.points?.length || 0}
+                  type: {m.type} • op: {m.operation || "add"} • z: {m.zIndex ?? 0}
                 </div>
+
                 <div style={ui.small}>
-                  opacity: {typeof m.opacity === "number" ? m.opacity.toFixed(2) : "1.00"}
+                  layer: {m.layerName || "default"} • points: {m.points?.length || 0}
+                </div>
+
+                <div style={ui.small}>
+                  opacity:{" "}
+                  {typeof m.opacity === "number" ? m.opacity.toFixed(2) : "1.00"} • visible:{" "}
+                  {m.visible === false ? "no" : "yes"} • locked: {m.locked ? "yes" : "no"}
                 </div>
               </div>
 

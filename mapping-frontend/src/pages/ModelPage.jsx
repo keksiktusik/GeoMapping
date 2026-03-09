@@ -51,18 +51,23 @@ export default function ModelPage() {
 
   // projector settings
   const [projector, setProjector] = useState({
-  distance: 2.5,
-  offsetX: 0,
-  offsetY: 0,
-  angleX: 0,
-  angleY: 0,
-  angleZ: 0,
-  fov: 45
-});
+    distance: 2.5,
+    offsetX: 0,
+    offsetY: 0,
+    angleX: 0,
+    angleY: 0,
+    angleZ: 0,
+    fov: 45
+  });
 
   // mask data
   const [maskName, setMaskName] = useState("");
   const [maskType, setMaskType] = useState("window");
+  const [operation, setOperation] = useState("add");
+  const [zIndex, setZIndex] = useState(0);
+  const [visible, setVisible] = useState(true);
+  const [locked, setLocked] = useState(false);
+  const [layerName, setLayerName] = useState("default");
 
   // saved masks
   const [masks, setMasks] = useState([]);
@@ -102,6 +107,33 @@ export default function ModelPage() {
     [selectedMaskId, hasPolygon, maskName]
   );
 
+  const activeDraft = useMemo(
+    () => ({
+      name: maskName,
+      type: maskType,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
+      points,
+      opacity,
+      isClosed
+    }),
+    [
+      maskName,
+      maskType,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
+      points,
+      opacity,
+      isClosed
+    ]
+  );
+
   const resetDraft = () => {
     setPoints([]);
     setIsClosed(false);
@@ -109,6 +141,11 @@ export default function ModelPage() {
     setSelectedMaskId(null);
     setMaskName("");
     setMaskType("window");
+    setOperation("add");
+    setZIndex(0);
+    setVisible(true);
+    setLocked(false);
+    setLayerName("default");
     setOpacity(0.35);
   };
 
@@ -120,6 +157,11 @@ export default function ModelPage() {
       modelId: MODEL_ID,
       name: maskName.trim(),
       type: maskType,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
       opacity,
       points: points.map((p) => ({
         x: Math.round(p.x),
@@ -137,6 +179,11 @@ export default function ModelPage() {
     const payload = {
       name: maskName.trim(),
       type: maskType,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
       opacity,
       points: points.map((p) => ({
         x: Math.round(p.x),
@@ -146,7 +193,11 @@ export default function ModelPage() {
 
     try {
       const created = await createMask(MODEL_ID, payload);
-      setMasks((prev) => [created, ...prev]);
+      setMasks((prev) =>
+        [...prev, created].sort(
+          (a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)
+        )
+      );
       setSelectedMaskId(created.id);
       setMode("edit");
     } catch (e) {
@@ -161,6 +212,11 @@ export default function ModelPage() {
     const patch = {
       name: maskName.trim(),
       type: maskType,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
       opacity,
       points: points.map((p) => ({
         x: Math.round(p.x),
@@ -170,7 +226,11 @@ export default function ModelPage() {
 
     try {
       const updated = await apiUpdateMask(selectedMaskId, patch);
-      setMasks((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+      setMasks((prev) =>
+        prev
+          .map((m) => (m.id === updated.id ? updated : m))
+          .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+      );
       alert("Zaktualizowano maskę ✅");
     } catch (e) {
       console.error(e);
@@ -182,7 +242,9 @@ export default function ModelPage() {
     try {
       await apiDeleteMask(id);
       setMasks((prev) => prev.filter((m) => m.id !== id));
-      if (selectedMaskId === id) resetDraft();
+      if (selectedMaskId === id) {
+        resetDraft();
+      }
     } catch (e) {
       console.error(e);
       alert("Nie udało się usunąć maski (sprawdź API / backend).");
@@ -196,6 +258,11 @@ export default function ModelPage() {
     setSelectedMaskId(id);
     setMaskName(mask.name || "");
     setMaskType(mask.type || "window");
+    setOperation(mask.operation || "add");
+    setZIndex(typeof mask.zIndex === "number" ? mask.zIndex : 0);
+    setVisible(mask.visible !== false);
+    setLocked(Boolean(mask.locked));
+    setLayerName(mask.layerName || "default");
     setPoints(Array.isArray(mask.points) ? mask.points : []);
     setOpacity(typeof mask.opacity === "number" ? mask.opacity : 0.35);
     setIsClosed(true);
@@ -213,8 +280,35 @@ export default function ModelPage() {
 
     try {
       localStorage.setItem(
-  STORAGE_OUTPUT,
-  JSON.stringify({
+        STORAGE_OUTPUT,
+        JSON.stringify({
+          points,
+          isClosed,
+          opacity,
+          showGrid,
+          masks,
+          warp,
+          projector,
+          renderMode,
+          draft: {
+            name: maskName,
+            type: maskType,
+            operation,
+            zIndex,
+            visible,
+            locked,
+            layerName,
+            points,
+            opacity,
+            isClosed
+          }
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [
+    isOutput,
     points,
     isClosed,
     opacity,
@@ -222,14 +316,15 @@ export default function ModelPage() {
     masks,
     warp,
     projector,
-    renderMode
-  })
-
-)
-    } catch {
-      // ignore
-    }
-  }, [isOutput, points, isClosed, opacity, showGrid, masks, warp, projector]);
+    renderMode,
+    maskName,
+    maskType,
+    operation,
+    zIndex,
+    visible,
+    locked,
+    layerName
+  ]);
 
   // ===== OUTPUT VIEW (projektor) =====
   if (isOutput) {
@@ -262,8 +357,7 @@ export default function ModelPage() {
         wallH={WALL_H}
         showGrid={showGrid}
         masks={masks}
-        activePoints={points}
-        opacity={opacity}
+        activeDraft={activeDraft}
         onTexture={setProjectionTexture}
       />
 
@@ -281,6 +375,16 @@ export default function ModelPage() {
               setMaskName={setMaskName}
               maskType={maskType}
               setMaskType={setMaskType}
+              operation={operation}
+              setOperation={setOperation}
+              zIndex={zIndex}
+              setZIndex={setZIndex}
+              visible={visible}
+              setVisible={setVisible}
+              locked={locked}
+              setLocked={setLocked}
+              layerName={layerName}
+              setLayerName={setLayerName}
               canSaveNew={canSaveNew}
               canUpdate={canUpdate}
               onSaveNew={saveNew}
