@@ -40,7 +40,7 @@ export default function ModelPage() {
   // settings
   const [opacity, setOpacity] = useState(0.35);
   const [showGrid, setShowGrid] = useState(false);
-
+  const [showPinkBackground, setShowPinkBackground] = useState(true);
   // warp / keystone
   const [warp, setWarp] = useState({
     tl: { x: 0, y: 0 },
@@ -286,6 +286,7 @@ export default function ModelPage() {
           isClosed,
           opacity,
           showGrid,
+          showPinkBackground,
           masks,
           warp,
           projector,
@@ -313,6 +314,7 @@ export default function ModelPage() {
     isClosed,
     opacity,
     showGrid,
+    showPinkBackground,
     masks,
     warp,
     projector,
@@ -369,6 +371,8 @@ export default function ModelPage() {
               setMode={setMode}
               showGrid={showGrid}
               setShowGrid={setShowGrid}
+              showPinkBackground={showPinkBackground}
+              setShowPinkBackground={setShowPinkBackground}
               opacity={opacity}
               setOpacity={setOpacity}
               maskName={maskName}

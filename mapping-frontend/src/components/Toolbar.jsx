@@ -5,6 +5,8 @@ export default function Toolbar({
   setMode,
   showGrid,
   setShowGrid,
+  showPinkBackground,
+  setShowPinkBackground,
   opacity,
   setOpacity,
   maskName,
@@ -131,6 +133,16 @@ export default function Toolbar({
         >
           Test Grid: {showGrid ? "ON" : "OFF"}
         </button>
+
+        <button
+  style={showPinkBackground ? ui.buttonPrimary : ui.button}
+  onClick={() => setShowPinkBackground(!showPinkBackground)}
+  type="button"
+>
+  Pink BG: {showPinkBackground ? "ON" : "OFF"}
+</button>
+
+
       </div>
 
       <div>
