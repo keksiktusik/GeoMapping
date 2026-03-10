@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, createPortal, useFrame, useThree } from "@react-three/fiber";
 import { useFBO, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -12,6 +12,7 @@ function getDefaultState() {
     isClosed: false,
     opacity: 1,
     showGrid: false,
+    showPinkBackground: true,
     masks: [],
     draft: {
       name: "",
@@ -197,6 +198,7 @@ function buildProjectionTexture({
   wallW,
   wallH,
   showGrid,
+  showPinkBackground,
   masks,
   activeDraft
 }) {
@@ -209,12 +211,14 @@ function buildProjectionTexture({
 
   ctx.clearRect(0, 0, wallW, wallH);
 
+if (showPinkBackground) {
   ctx.fillStyle = "#ff4fbf";
   ctx.fillRect(0, 0, wallW, wallH);
+}
 
-  if (showGrid) {
-    drawGrid(ctx, wallW, wallH);
-  }
+if (showGrid) {
+  drawGrid(ctx, wallW, wallH);
+}
 
   const compositeMask = buildCompositeMask({
     wallW,
@@ -640,20 +644,23 @@ function WarpOutputSurface({ texture, warp, wallW, wallH }) {
 
   return (
     <mesh geometry={geometry}>
-      <meshBasicMaterial map={texture} />
+      <meshBasicMaterial map={texture} transparent toneMapped={false} />
     </mesh>
   );
 }
 
-function OutputPipeline({ state, wallW, wallH }) {
-  const desiredTarget = useFBO(wallW, wallH, {
+function OutputPipeline({ state, wallW, wallH, viewportW, viewportH }) {
+  const renderW = Math.max(2, Math.floor(viewportW || wallW));
+  const renderH = Math.max(2, Math.floor(viewportH || wallH));
+
+  const desiredTarget = useFBO(renderW, renderH, {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
     stencilBuffer: false
   });
 
-  const projectorTarget = useFBO(wallW, wallH, {
+  const projectorTarget = useFBO(renderW, renderH, {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
@@ -664,9 +671,7 @@ function OutputPipeline({ state, wallW, wallH }) {
   const compensationScene = useMemo(() => new THREE.Scene(), []);
 
   const activeDraft = useMemo(() => {
-    if (state?.draft) {
-      return state.draft;
-    }
+    if (state?.draft) return state.draft;
 
     return {
       points: state.points || [],
@@ -678,19 +683,27 @@ function OutputPipeline({ state, wallW, wallH }) {
     };
   }, [state]);
 
-  const projectionTexture = useMemo(
-    () =>
-      buildProjectionTexture({
-        wallW,
-        wallH,
-        showGrid: state.showGrid,
-        masks: state.masks,
-        activeDraft
-      }),
-    [wallW, wallH, state.showGrid, state.masks, activeDraft]
-  );
+ const projectionTexture = useMemo(
+  () =>
+    buildProjectionTexture({
+      wallW,
+      wallH,
+      showGrid: state.showGrid,
+      showPinkBackground: state.showPinkBackground,
+      masks: state.masks,
+      activeDraft
+    }),
+  [
+    wallW,
+    wallH,
+    state.showGrid,
+    state.showPinkBackground,
+    state.masks,
+    activeDraft
+  ]
+);
 
-  const aspect = wallW / wallH;
+  const aspect = renderW / renderH;
   const referenceCamera = useMemo(() => makeReferenceCamera(aspect), [aspect]);
 
   return (
@@ -730,6 +743,10 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
     safeParse(localStorage.getItem(STORAGE_KEY), getDefaultState())
   );
 
+  const rootRef = React.useRef(null);
+  const [viewport, setViewport] = useState({ width: wallW, height: wallH });
+  const [canvasKey, setCanvasKey] = useState(0);
+
   useEffect(() => {
     const sync = () => {
       setState(safeParse(localStorage.getItem(STORAGE_KEY), getDefaultState()));
@@ -744,20 +761,82 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
     };
   }, []);
 
+  useEffect(() => {
+    const updateSize = () => {
+      const el = rootRef.current;
+      if (!el) return;
+
+      const rect = el.getBoundingClientRect();
+      setViewport({
+        width: Math.max(2, Math.floor(rect.width)),
+        height: Math.max(2, Math.floor(rect.height))
+      });
+    };
+
+    updateSize();
+
+    const ro = new ResizeObserver(() => {
+      updateSize();
+    });
+
+    if (rootRef.current) {
+      ro.observe(rootRef.current);
+    }
+
+    const onFullscreenChange = () => {
+      updateSize();
+      setCanvasKey((k) => k + 1);
+    };
+
+    window.addEventListener("fullscreenchange", onFullscreenChange);
+    window.addEventListener("resize", updateSize);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("fullscreenchange", onFullscreenChange);
+      window.removeEventListener("resize", updateSize);
+    };
+  }, [wallW, wallH]);
+
   return (
     <div
+      ref={rootRef}
       style={{
-        width: "100vw",
-        height: "100vh",
+        width: "100%",
+        height: "100%",
+        minWidth: "100vw",
+        minHeight: "100vh",
         background: "black",
         overflow: "hidden"
       }}
     >
       <Canvas
-        gl={{ antialias: true }}
-        style={{ width: "100vw", height: "100vh", display: "block" }}
+        key={canvasKey}
+        dpr={[1, 1.5]}
+        frameloop="always"
+        resize={{ scroll: false, debounce: { resize: 0, scroll: 0 } }}
+        gl={{
+          antialias: true,
+          alpha: false,
+          powerPreference: "high-performance"
+        }}
+        onCreated={({ gl }) => {
+          gl.setClearColor("#000000", 1);
+        }}
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "block",
+          background: "black"
+        }}
       >
-        <OutputPipeline state={state} wallW={wallW} wallH={wallH} />
+        <OutputPipeline
+          state={state}
+          wallW={wallW}
+          wallH={wallH}
+          viewportW={viewport.width}
+          viewportH={viewport.height}
+        />
       </Canvas>
     </div>
   );
