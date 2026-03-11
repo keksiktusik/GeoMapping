@@ -23,6 +23,10 @@ export default function Toolbar({
   setLocked,
   layerName,
   setLayerName,
+  textureType,
+  setTextureType,
+  textureValue,
+  setTextureValue,
   canSaveNew,
   canUpdate,
   onSaveNew,
@@ -81,6 +85,42 @@ export default function Toolbar({
       </div>
 
       <div>
+        <div style={ui.label}>Projection material</div>
+        <select
+          style={ui.input}
+          value={textureType}
+          onChange={(e) => setTextureType(e.target.value)}
+        >
+          <option value="color">color</option>
+          <option value="image">image (future)</option>
+          <option value="video">video (future)</option>
+        </select>
+      </div>
+
+      <div>
+        <div style={ui.label}>Material value</div>
+        {textureType === "color" ? (
+          <input
+            style={{ ...ui.input, height: 42, padding: 4 }}
+            type="color"
+            value={textureValue || "#ffffff"}
+            onChange={(e) => setTextureValue(e.target.value)}
+          />
+        ) : (
+          <input
+            style={ui.input}
+            value={textureValue}
+            onChange={(e) => setTextureValue(e.target.value)}
+            placeholder={
+              textureType === "image"
+                ? "np. /textures/window.jpg"
+                : "np. /video/window.mp4"
+            }
+          />
+        )}
+      </div>
+
+      <div>
         <div style={ui.label}>Z-index</div>
         <input
           style={ui.input}
@@ -126,23 +166,24 @@ export default function Toolbar({
 
       <div>
         <div style={ui.label}>Helpers</div>
-        <button
-          style={showGrid ? ui.buttonPrimary : ui.button}
-          onClick={() => setShowGrid(!showGrid)}
-          type="button"
-        >
-          Test Grid: {showGrid ? "ON" : "OFF"}
-        </button>
 
-        <button
-  style={showPinkBackground ? ui.buttonPrimary : ui.button}
-  onClick={() => setShowPinkBackground(!showPinkBackground)}
-  type="button"
->
-  Pink BG: {showPinkBackground ? "ON" : "OFF"}
-</button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button
+            style={showGrid ? ui.buttonPrimary : ui.button}
+            onClick={() => setShowGrid(!showGrid)}
+            type="button"
+          >
+            Test Grid: {showGrid ? "ON" : "OFF"}
+          </button>
 
-
+          <button
+            style={showPinkBackground ? ui.buttonPrimary : ui.button}
+            onClick={() => setShowPinkBackground(!showPinkBackground)}
+            type="button"
+          >
+            Pink BG: {showPinkBackground ? "ON" : "OFF"}
+          </button>
+        </div>
       </div>
 
       <div>

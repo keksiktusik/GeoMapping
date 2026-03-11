@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS masks (
   visible TINYINT(1) NOT NULL DEFAULT 1,
   locked TINYINT(1) NOT NULL DEFAULT 0,
   layer_name VARCHAR(100) NOT NULL DEFAULT 'default',
+  texture_type VARCHAR(20) NOT NULL DEFAULT 'color',
+  texture_value VARCHAR(255) NOT NULL DEFAULT '#ffffff',
   opacity DOUBLE NOT NULL DEFAULT 1,
   points_json JSON NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

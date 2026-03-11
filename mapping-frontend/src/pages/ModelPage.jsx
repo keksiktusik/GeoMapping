@@ -41,6 +41,7 @@ export default function ModelPage() {
   const [opacity, setOpacity] = useState(0.35);
   const [showGrid, setShowGrid] = useState(false);
   const [showPinkBackground, setShowPinkBackground] = useState(true);
+
   // warp / keystone
   const [warp, setWarp] = useState({
     tl: { x: 0, y: 0 },
@@ -69,6 +70,10 @@ export default function ModelPage() {
   const [locked, setLocked] = useState(false);
   const [layerName, setLayerName] = useState("default");
 
+  // NOWE: materiał projekcji maski
+  const [textureType, setTextureType] = useState("color");
+  const [textureValue, setTextureValue] = useState("#ffffff");
+
   // saved masks
   const [masks, setMasks] = useState([]);
   const [selectedMaskId, setSelectedMaskId] = useState(null);
@@ -84,7 +89,7 @@ export default function ModelPage() {
     (async () => {
       try {
         const data = await getMasks(MODEL_ID);
-        setMasks(data);
+        setMasks(Array.isArray(data) ? data : []);
       } catch (e) {
         console.error(e);
         alert("Nie udało się pobrać masek (sprawdź API / mock).");
@@ -116,6 +121,8 @@ export default function ModelPage() {
       visible,
       locked,
       layerName,
+      textureType,
+      textureValue,
       points,
       opacity,
       isClosed
@@ -128,6 +135,8 @@ export default function ModelPage() {
       visible,
       locked,
       layerName,
+      textureType,
+      textureValue,
       points,
       opacity,
       isClosed
@@ -146,6 +155,8 @@ export default function ModelPage() {
     setVisible(true);
     setLocked(false);
     setLayerName("default");
+    setTextureType("color");
+    setTextureValue("#ffffff");
     setOpacity(0.35);
   };
 
@@ -162,6 +173,8 @@ export default function ModelPage() {
       visible,
       locked,
       layerName,
+      textureType,
+      textureValue,
       opacity,
       points: points.map((p) => ({
         x: Math.round(p.x),
@@ -184,6 +197,8 @@ export default function ModelPage() {
       visible,
       locked,
       layerName,
+      textureType,
+      textureValue,
       opacity,
       points: points.map((p) => ({
         x: Math.round(p.x),
@@ -217,6 +232,8 @@ export default function ModelPage() {
       visible,
       locked,
       layerName,
+      textureType,
+      textureValue,
       opacity,
       points: points.map((p) => ({
         x: Math.round(p.x),
@@ -263,6 +280,8 @@ export default function ModelPage() {
     setVisible(mask.visible !== false);
     setLocked(Boolean(mask.locked));
     setLayerName(mask.layerName || "default");
+    setTextureType(mask.textureType || "color");
+    setTextureValue(mask.textureValue || "#ffffff");
     setPoints(Array.isArray(mask.points) ? mask.points : []);
     setOpacity(typeof mask.opacity === "number" ? mask.opacity : 0.35);
     setIsClosed(true);
@@ -299,6 +318,8 @@ export default function ModelPage() {
             visible,
             locked,
             layerName,
+            textureType,
+            textureValue,
             points,
             opacity,
             isClosed
@@ -325,7 +346,9 @@ export default function ModelPage() {
     zIndex,
     visible,
     locked,
-    layerName
+    layerName,
+    textureType,
+    textureValue
   ]);
 
   // ===== OUTPUT VIEW (projektor) =====
@@ -389,6 +412,10 @@ export default function ModelPage() {
               setLocked={setLocked}
               layerName={layerName}
               setLayerName={setLayerName}
+              textureType={textureType}
+              setTextureType={setTextureType}
+              textureValue={textureValue}
+              setTextureValue={setTextureValue}
               canSaveNew={canSaveNew}
               canUpdate={canUpdate}
               onSaveNew={saveNew}

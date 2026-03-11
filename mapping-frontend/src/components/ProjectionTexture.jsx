@@ -37,7 +37,15 @@ function drawPolygonStroke(ctx, pts) {
   ctx.restore();
 }
 
-function renderShapeAlpha(shape, wallW, wallH) {
+function getShapeFillStyle(shape) {
+  if (shape?.textureType === "color") {
+    return shape.textureValue || "#ffffff";
+  }
+
+  return "#ffffff";
+}
+
+function renderShape(shape, wallW, wallH) {
   const { canvas, ctx } = createBuffer(wallW, wallH);
 
   if (!drawPolygonPath(ctx, shape.points)) {
@@ -45,47 +53,55 @@ function renderShapeAlpha(shape, wallW, wallH) {
   }
 
   const alpha = typeof shape.opacity === "number" ? shape.opacity : 1;
+  const fillStyle = getShapeFillStyle(shape);
 
   ctx.save();
-  ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = fillStyle;
   ctx.fill();
   ctx.restore();
 
   return canvas;
 }
 
-function applyShapeToMask(maskCanvas, shapeCanvas, operation, wallW, wallH) {
-  const maskCtx = maskCanvas.getContext("2d");
+function applyShapeToComposite(
+  compositeCanvas,
+  shapeCanvas,
+  operation,
+  wallW,
+  wallH
+) {
+  const compositeCtx = compositeCanvas.getContext("2d");
 
   if (operation === "subtract") {
-    maskCtx.save();
-    maskCtx.globalCompositeOperation = "destination-out";
-    maskCtx.drawImage(shapeCanvas, 0, 0);
-    maskCtx.restore();
+    compositeCtx.save();
+    compositeCtx.globalCompositeOperation = "destination-out";
+    compositeCtx.drawImage(shapeCanvas, 0, 0);
+    compositeCtx.restore();
     return;
   }
 
   if (operation === "intersect") {
     const { canvas: temp, ctx: tempCtx } = createBuffer(wallW, wallH);
 
-    tempCtx.drawImage(maskCanvas, 0, 0);
+    tempCtx.drawImage(compositeCanvas, 0, 0);
     tempCtx.globalCompositeOperation = "destination-in";
     tempCtx.drawImage(shapeCanvas, 0, 0);
 
-    maskCtx.clearRect(0, 0, wallW, wallH);
-    maskCtx.drawImage(temp, 0, 0);
+    compositeCtx.clearRect(0, 0, wallW, wallH);
+    compositeCtx.drawImage(temp, 0, 0);
     return;
   }
 
-  maskCtx.save();
-  maskCtx.globalCompositeOperation = "source-over";
-  maskCtx.drawImage(shapeCanvas, 0, 0);
-  maskCtx.restore();
+  compositeCtx.save();
+  compositeCtx.globalCompositeOperation = "source-over";
+  compositeCtx.drawImage(shapeCanvas, 0, 0);
+  compositeCtx.restore();
 }
 
-function buildCompositeMask({ wallW, wallH, masks = [], activeDraft = null }) {
-  const { canvas: maskCanvas, ctx: maskCtx } = createBuffer(wallW, wallH);
-  maskCtx.clearRect(0, 0, wallW, wallH);
+function buildCompositeTexture({ wallW, wallH, masks = [], activeDraft = null }) {
+  const { canvas: compositeCanvas, ctx: compositeCtx } = createBuffer(wallW, wallH);
+  compositeCtx.clearRect(0, 0, wallW, wallH);
 
   const allShapes = [...masks];
 
@@ -103,6 +119,8 @@ function buildCompositeMask({ wallW, wallH, masks = [], activeDraft = null }) {
       zIndex: typeof activeDraft.zIndex === "number" ? activeDraft.zIndex : 999999,
       visible: activeDraft.visible,
       opacity: typeof activeDraft.opacity === "number" ? activeDraft.opacity : 1,
+      textureType: activeDraft.textureType || "color",
+      textureValue: activeDraft.textureValue || "#ffffff",
       points: activeDraft.points
     });
   }
@@ -117,9 +135,9 @@ function buildCompositeMask({ wallW, wallH, masks = [], activeDraft = null }) {
     });
 
   for (const shape of orderedShapes) {
-    const shapeCanvas = renderShapeAlpha(shape, wallW, wallH);
-    applyShapeToMask(
-      maskCanvas,
+    const shapeCanvas = renderShape(shape, wallW, wallH);
+    applyShapeToComposite(
+      compositeCanvas,
       shapeCanvas,
       shape.operation || "add",
       wallW,
@@ -127,7 +145,7 @@ function buildCompositeMask({ wallW, wallH, masks = [], activeDraft = null }) {
     );
   }
 
-  return maskCanvas;
+  return compositeCanvas;
 }
 
 function drawGrid(ctx, wallW, wallH) {
@@ -213,7 +231,7 @@ export default function ProjectionTexture({
     if (img && loaded) {
       ctx.drawImage(img, 0, 0, wallW, wallH);
     } else {
-      ctx.fillStyle = "#f5f5f5";
+      ctx.fillStyle = "#111111";
       ctx.fillRect(0, 0, wallW, wallH);
     }
 
@@ -221,7 +239,7 @@ export default function ProjectionTexture({
       drawGrid(ctx, wallW, wallH);
     }
 
-    const compositeMask = buildCompositeMask({
+    const compositeTexture = buildCompositeTexture({
       wallW,
       wallH,
       masks,
@@ -229,8 +247,8 @@ export default function ProjectionTexture({
     });
 
     ctx.save();
-    ctx.globalCompositeOperation = "destination-in";
-    ctx.drawImage(compositeMask, 0, 0);
+    ctx.globalCompositeOperation = "multiply";
+    ctx.drawImage(compositeTexture, 0, 0);
     ctx.restore();
 
     if (activeDraft?.points && activeDraft.points.length >= 2) {
