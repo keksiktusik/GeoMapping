@@ -1,5 +1,6 @@
 import { ui } from "../styles/ui";
 
+const MIN_DISTANCE = 0.5;
 const DEFAULT_PROJECTOR = {
   distance: 5,
   offsetX: 0,
@@ -10,11 +11,30 @@ const DEFAULT_PROJECTOR = {
   fov: 45
 };
 
+function clampNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clampProjectorField(key, value) {
+  const n = clampNumber(value, DEFAULT_PROJECTOR[key] ?? 0);
+
+  if (key === "distance") {
+    return Math.max(MIN_DISTANCE, n);
+  }
+
+  if (key === "fov") {
+    return Math.max(10, Math.min(150, n));
+  }
+
+  return n;
+}
+
 export default function ProjectorSettings({ projector, setProjector }) {
   const update = (key, value) => {
     setProjector((prev) => ({
       ...prev,
-      [key]: Number.isNaN(value) ? 0 : value
+      [key]: clampProjectorField(key, value)
     }));
   };
 
@@ -31,6 +51,7 @@ export default function ProjectorSettings({ projector, setProjector }) {
         label="Distance"
         value={projector.distance}
         step={0.1}
+        min={MIN_DISTANCE}
         defaultValue={DEFAULT_PROJECTOR.distance}
         onChange={(v) => update("distance", v)}
         onReset={() => resetField("distance")}

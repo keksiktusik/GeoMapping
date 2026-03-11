@@ -30,7 +30,8 @@ app.use(
 
 const DB_HOST = process.env.DB_HOST || "localhost";
 const DB_USER = process.env.DB_USER || process.env.MYSQL_USER || "app";
-const DB_PASSWORD = process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || "change_me";
+const DB_PASSWORD =
+  process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || "change_me";
 const DB_NAME = process.env.DB_NAME || process.env.MYSQL_DATABASE || "geomapping";
 const PORT = Number(process.env.PORT || process.env.API_PORT || 3001);
 
@@ -42,6 +43,13 @@ const pointSchema = z.object({
 const maskBaseSchema = z.object({
   name: z.string().trim().min(1).max(255),
   type: z.string().trim().min(1).max(50).default("polygon"),
+  operation: z.string().trim().min(1).max(20).default("add"),
+  zIndex: z.number().int().default(0),
+  visible: z.boolean().default(true),
+  locked: z.boolean().default(false),
+  layerName: z.string().trim().min(1).max(100).default("default"),
+  textureType: z.string().trim().min(1).max(20).default("color"),
+  textureValue: z.string().trim().min(1).max(255).default("#ffffff"),
   opacity: z.number().min(0).max(1).default(1),
   points: z.array(pointSchema).min(3)
 });
@@ -80,6 +88,13 @@ function mapMaskRow(row) {
     modelId: Number(row.modelId),
     name: row.name,
     type: row.type,
+    operation: row.operation,
+    zIndex: Number(row.z_index),
+    visible: Boolean(row.visible),
+    locked: Boolean(row.locked),
+    layerName: row.layer_name,
+    textureType: row.texture_type || "color",
+    textureValue: row.texture_value || "#ffffff",
     opacity: Number(row.opacity),
     points: parsePoints(row.points_json)
   };
@@ -135,11 +150,18 @@ app.get("/masks", async (req, res, next) => {
         modelId,
         name,
         type,
+        operation,
+        z_index,
+        visible,
+        locked,
+        layer_name,
+        texture_type,
+        texture_value,
         opacity,
         points_json
       FROM masks
       WHERE modelId = ?
-      ORDER BY created_at DESC`,
+      ORDER BY z_index ASC, created_at DESC`,
       [modelId]
     );
 
@@ -153,20 +175,62 @@ app.post("/masks", async (req, res, next) => {
   try {
     const parsed = maskCreateSchema.safeParse({
       ...req.body,
-      modelId: Number(req.body?.modelId ?? 1)
+      modelId: Number(req.body?.modelId ?? 1),
+      zIndex: Number(req.body?.zIndex ?? 0),
+      visible: req.body?.visible !== false,
+      locked: Boolean(req.body?.locked)
     });
 
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
 
-    const { modelId, name, type, opacity, points } = parsed.data;
+    const {
+      modelId,
+      name,
+      type,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
+      textureType,
+      textureValue,
+      opacity,
+      points
+    } = parsed.data;
 
     const [result] = await pool.query(
       `INSERT INTO masks
-        (modelId, name, type, opacity, points_json)
-       VALUES (?, ?, ?, ?, ?)`,
-      [modelId, name, type, opacity, JSON.stringify(points)]
+        (
+          modelId,
+          name,
+          type,
+          operation,
+          z_index,
+          visible,
+          locked,
+          layer_name,
+          texture_type,
+          texture_value,
+          opacity,
+          points_json
+        )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        modelId,
+        name,
+        type,
+        operation,
+        zIndex,
+        visible ? 1 : 0,
+        locked ? 1 : 0,
+        layerName,
+        textureType,
+        textureValue,
+        opacity,
+        JSON.stringify(points)
+      ]
     );
 
     res.status(201).json({
@@ -174,6 +238,13 @@ app.post("/masks", async (req, res, next) => {
       modelId,
       name,
       type,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
+      textureType,
+      textureValue,
       opacity,
       points
     });
@@ -190,23 +261,60 @@ app.patch("/masks/:id", async (req, res, next) => {
       return res.status(400).json({ error: "Invalid id" });
     }
 
-    const parsed = maskUpdateSchema.safeParse(req.body);
+    const parsed = maskUpdateSchema.safeParse({
+      ...req.body,
+      zIndex: Number(req.body?.zIndex ?? 0),
+      visible: req.body?.visible !== false,
+      locked: Boolean(req.body?.locked)
+    });
 
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
 
-    const { name, type, opacity, points } = parsed.data;
+    const {
+      name,
+      type,
+      operation,
+      zIndex,
+      visible,
+      locked,
+      layerName,
+      textureType,
+      textureValue,
+      opacity,
+      points
+    } = parsed.data;
 
     const [result] = await pool.query(
       `UPDATE masks
        SET
          name = ?,
          type = ?,
+         operation = ?,
+         z_index = ?,
+         visible = ?,
+         locked = ?,
+         layer_name = ?,
+         texture_type = ?,
+         texture_value = ?,
          opacity = ?,
          points_json = ?
        WHERE id = ?`,
-      [name, type, opacity, JSON.stringify(points), id]
+      [
+        name,
+        type,
+        operation,
+        zIndex,
+        visible ? 1 : 0,
+        locked ? 1 : 0,
+        layerName,
+        textureType,
+        textureValue,
+        opacity,
+        JSON.stringify(points),
+        id
+      ]
     );
 
     if (result.affectedRows === 0) {
@@ -219,6 +327,13 @@ app.patch("/masks/:id", async (req, res, next) => {
         modelId,
         name,
         type,
+        operation,
+        z_index,
+        visible,
+        locked,
+        layer_name,
+        texture_type,
+        texture_value,
         opacity,
         points_json
       FROM masks

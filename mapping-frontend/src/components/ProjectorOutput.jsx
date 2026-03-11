@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Canvas, createPortal, useFrame, useThree } from "@react-three/fiber";
 import { useFBO, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 
 const STORAGE_KEY = "mapping_output_state_v1";
 const MODEL_URL = "/models/fasada.glb";
+const MIN_DISTANCE = 0.5;
 
 function getDefaultState() {
   return {
@@ -22,6 +23,8 @@ function getDefaultState() {
       visible: true,
       locked: false,
       layerName: "default",
+      textureType: "color",
+      textureValue: "#ffffff",
       points: [],
       opacity: 1,
       isClosed: false
@@ -34,7 +37,7 @@ function getDefaultState() {
     },
     renderMode: "plane",
     projector: {
-      distance: 2.5,
+      distance: 5,
       offsetX: 0,
       offsetY: 0,
       angleX: 0,
@@ -57,6 +60,18 @@ function degToRad(v) {
   return THREE.MathUtils.degToRad(Number(v || 0));
 }
 
+function getSafeProjector(projector = {}) {
+  return {
+    distance: Math.max(MIN_DISTANCE, Number(projector?.distance || 2.5)),
+    offsetX: Number(projector?.offsetX || 0),
+    offsetY: Number(projector?.offsetY || 0),
+    angleX: Number(projector?.angleX || 0),
+    angleY: Number(projector?.angleY || 0),
+    angleZ: Number(projector?.angleZ || 0),
+    fov: Math.max(10, Math.min(150, Number(projector?.fov || 45)))
+  };
+}
+
 function createBuffer(w, h) {
   const canvas = document.createElement("canvas");
   canvas.width = w;
@@ -77,7 +92,15 @@ function drawPolygonPath(ctx, pts) {
   return true;
 }
 
-function renderShapeAlpha(shape, wallW, wallH) {
+function getShapeFillStyle(shape) {
+  if (shape?.textureType === "color") {
+    return shape.textureValue || "#ffffff";
+  }
+
+  return "#ffffff";
+}
+
+function renderShape(shape, wallW, wallH) {
   const { canvas, ctx } = createBuffer(wallW, wallH);
 
   if (!drawPolygonPath(ctx, shape.points)) {
@@ -85,49 +108,51 @@ function renderShapeAlpha(shape, wallW, wallH) {
   }
 
   const alpha = typeof shape.opacity === "number" ? shape.opacity : 1;
+  const fillStyle = getShapeFillStyle(shape);
 
   ctx.save();
-  ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = fillStyle;
   ctx.fill();
   ctx.restore();
 
   return canvas;
 }
 
-function applyShapeToMask(maskCanvas, shapeCanvas, operation, wallW, wallH) {
-  const maskCtx = maskCanvas.getContext("2d");
+function applyShapeToComposite(compositeCanvas, shapeCanvas, operation, wallW, wallH) {
+  const compositeCtx = compositeCanvas.getContext("2d");
 
   if (operation === "subtract") {
-    maskCtx.save();
-    maskCtx.globalCompositeOperation = "destination-out";
-    maskCtx.drawImage(shapeCanvas, 0, 0);
-    maskCtx.restore();
+    compositeCtx.save();
+    compositeCtx.globalCompositeOperation = "destination-out";
+    compositeCtx.drawImage(shapeCanvas, 0, 0);
+    compositeCtx.restore();
     return;
   }
 
   if (operation === "intersect") {
     const { canvas: temp, ctx: tempCtx } = createBuffer(wallW, wallH);
 
-    tempCtx.drawImage(maskCanvas, 0, 0);
+    tempCtx.drawImage(compositeCanvas, 0, 0);
     tempCtx.globalCompositeOperation = "destination-in";
     tempCtx.drawImage(shapeCanvas, 0, 0);
 
-    maskCtx.clearRect(0, 0, wallW, wallH);
-    maskCtx.drawImage(temp, 0, 0);
+    compositeCtx.clearRect(0, 0, wallW, wallH);
+    compositeCtx.drawImage(temp, 0, 0);
     return;
   }
 
-  maskCtx.save();
-  maskCtx.globalCompositeOperation = "source-over";
-  maskCtx.drawImage(shapeCanvas, 0, 0);
-  maskCtx.restore();
+  compositeCtx.save();
+  compositeCtx.globalCompositeOperation = "source-over";
+  compositeCtx.drawImage(shapeCanvas, 0, 0);
+  compositeCtx.restore();
 }
 
-function buildCompositeMask({ wallW, wallH, masks = [], activeDraft = null }) {
-  const { canvas: maskCanvas, ctx: maskCtx } = createBuffer(wallW, wallH);
-  maskCtx.clearRect(0, 0, wallW, wallH);
+function buildCompositeTexture({ wallW, wallH, masks = [], activeDraft = null }) {
+  const { canvas: compositeCanvas, ctx: compositeCtx } = createBuffer(wallW, wallH);
+  compositeCtx.clearRect(0, 0, wallW, wallH);
 
-  const allShapes = [...masks];
+  const allShapes = [...(masks || [])];
 
   if (
     activeDraft?.isClosed &&
@@ -144,6 +169,8 @@ function buildCompositeMask({ wallW, wallH, masks = [], activeDraft = null }) {
         typeof activeDraft.zIndex === "number" ? activeDraft.zIndex : 999999,
       visible: activeDraft.visible,
       opacity: typeof activeDraft.opacity === "number" ? activeDraft.opacity : 1,
+      textureType: activeDraft.textureType || "color",
+      textureValue: activeDraft.textureValue || "#ffffff",
       points: activeDraft.points
     });
   }
@@ -158,9 +185,9 @@ function buildCompositeMask({ wallW, wallH, masks = [], activeDraft = null }) {
     });
 
   for (const shape of orderedShapes) {
-    const shapeCanvas = renderShapeAlpha(shape, wallW, wallH);
-    applyShapeToMask(
-      maskCanvas,
+    const shapeCanvas = renderShape(shape, wallW, wallH);
+    applyShapeToComposite(
+      compositeCanvas,
       shapeCanvas,
       shape.operation || "add",
       wallW,
@@ -168,7 +195,7 @@ function buildCompositeMask({ wallW, wallH, masks = [], activeDraft = null }) {
     );
   }
 
-  return maskCanvas;
+  return compositeCanvas;
 }
 
 function drawGrid(ctx, wallW, wallH) {
@@ -211,16 +238,16 @@ function buildProjectionTexture({
 
   ctx.clearRect(0, 0, wallW, wallH);
 
-if (showPinkBackground) {
-  ctx.fillStyle = "#ff4fbf";
-  ctx.fillRect(0, 0, wallW, wallH);
-}
+  if (showPinkBackground) {
+    ctx.fillStyle = "#ff4fbf";
+    ctx.fillRect(0, 0, wallW, wallH);
+  }
 
-if (showGrid) {
-  drawGrid(ctx, wallW, wallH);
-}
+  if (showGrid) {
+    drawGrid(ctx, wallW, wallH);
+  }
 
-  const compositeMask = buildCompositeMask({
+  const compositeTexture = buildCompositeTexture({
     wallW,
     wallH,
     masks,
@@ -228,8 +255,8 @@ if (showGrid) {
   });
 
   ctx.save();
-  ctx.globalCompositeOperation = "destination-in";
-  ctx.drawImage(compositeMask, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.drawImage(compositeTexture, 0, 0);
   ctx.restore();
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -253,23 +280,16 @@ function makeReferenceCamera(aspect) {
 }
 
 function makeProjectorCamera(projector, aspect) {
-  const cam = new THREE.PerspectiveCamera(
-    Number(projector?.fov || 45),
-    aspect,
-    0.1,
-    100
-  );
+  const p = getSafeProjector(projector);
 
-  cam.position.set(
-    Number(projector?.offsetX || 0),
-    Number(projector?.offsetY || 0),
-    Number(projector?.distance || 2.5)
-  );
+  const cam = new THREE.PerspectiveCamera(p.fov, aspect, 0.1, 100);
+
+  cam.position.set(p.offsetX, p.offsetY, p.distance);
 
   cam.rotation.set(
-    degToRad(projector?.angleX),
-    degToRad(projector?.angleY),
-    degToRad(projector?.angleZ)
+    degToRad(p.angleX),
+    degToRad(p.angleY),
+    degToRad(p.angleZ)
   );
 
   cam.updateProjectionMatrix();
@@ -679,29 +699,31 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH }) {
       operation: "add",
       zIndex: 999999,
       visible: true,
+      textureType: "color",
+      textureValue: "#ffffff",
       isClosed: Boolean(state.isClosed)
     };
   }, [state]);
 
- const projectionTexture = useMemo(
-  () =>
-    buildProjectionTexture({
+  const projectionTexture = useMemo(
+    () =>
+      buildProjectionTexture({
+        wallW,
+        wallH,
+        showGrid: state.showGrid,
+        showPinkBackground: state.showPinkBackground,
+        masks: state.masks,
+        activeDraft
+      }),
+    [
       wallW,
       wallH,
-      showGrid: state.showGrid,
-      showPinkBackground: state.showPinkBackground,
-      masks: state.masks,
+      state.showGrid,
+      state.showPinkBackground,
+      state.masks,
       activeDraft
-    }),
-  [
-    wallW,
-    wallH,
-    state.showGrid,
-    state.showPinkBackground,
-    state.masks,
-    activeDraft
-  ]
-);
+    ]
+  );
 
   const aspect = renderW / renderH;
   const referenceCamera = useMemo(() => makeReferenceCamera(aspect), [aspect]);
@@ -749,8 +771,18 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
 
   useEffect(() => {
     const sync = () => {
-      setState(safeParse(localStorage.getItem(STORAGE_KEY), getDefaultState()));
+      const nextState = safeParse(
+        localStorage.getItem(STORAGE_KEY),
+        getDefaultState()
+      );
+
+      setState({
+        ...nextState,
+        projector: getSafeProjector(nextState?.projector || {})
+      });
     };
+
+    sync();
 
     window.addEventListener("storage", sync);
     const interval = setInterval(sync, 200);
