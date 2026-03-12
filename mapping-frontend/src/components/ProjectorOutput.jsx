@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, createPortal, useFrame, useThree } from "@react-three/fiber";
 import { useFBO, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -92,15 +92,71 @@ function drawPolygonPath(ctx, pts) {
   return true;
 }
 
-function getShapeFillStyle(shape) {
-  if (shape?.textureType === "color") {
-    return shape.textureValue || "#ffffff";
+function drawGrid(ctx, wallW, wallH) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.lineWidth = 1;
+  const step = 40;
+
+  for (let x = 0; x <= wallW; x += step) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, wallH);
+    ctx.stroke();
   }
 
-  return "#ffffff";
+  for (let y = 0; y <= wallH; y += step) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(wallW, y);
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
-function renderShape(shape, wallW, wallH) {
+function getLoadedImage(src, imageCache) {
+  if (!src) return null;
+  const cached = imageCache.current.get(src);
+  if (cached?.status === "loaded") return cached.img;
+  return null;
+}
+
+function loadImage(src, imageCache, onReady) {
+  if (!src) return null;
+
+  const cached = imageCache.current.get(src);
+  if (cached) {
+    if (cached.status === "loaded") return cached.img;
+    return null;
+  }
+
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+
+  const entry = {
+    status: "loading",
+    img
+  };
+
+  imageCache.current.set(src, entry);
+
+  img.onload = () => {
+    entry.status = "loaded";
+    onReady?.();
+  };
+
+  img.onerror = () => {
+    entry.status = "error";
+    onReady?.();
+  };
+
+  img.src = src;
+
+  return null;
+}
+
+function renderShape(shape, wallW, wallH, imageCache, onAssetReady) {
   const { canvas, ctx } = createBuffer(wallW, wallH);
 
   if (!drawPolygonPath(ctx, shape.points)) {
@@ -108,11 +164,33 @@ function renderShape(shape, wallW, wallH) {
   }
 
   const alpha = typeof shape.opacity === "number" ? shape.opacity : 1;
-  const fillStyle = getShapeFillStyle(shape);
+  const textureType = shape?.textureType || "color";
+  const textureValue = shape?.textureValue || "#ffffff";
 
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = fillStyle;
+
+  if (textureType === "image") {
+    const loadedImg =
+      getLoadedImage(textureValue, imageCache) ||
+      loadImage(textureValue, imageCache, onAssetReady);
+
+    ctx.save();
+    ctx.clip();
+
+    if (loadedImg) {
+      ctx.drawImage(loadedImg, 0, 0, wallW, wallH);
+    } else {
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+    }
+
+    ctx.restore();
+    ctx.restore();
+    return canvas;
+  }
+
+  ctx.fillStyle = textureType === "color" ? textureValue : "#ffffff";
   ctx.fill();
   ctx.restore();
 
@@ -148,7 +226,14 @@ function applyShapeToComposite(compositeCanvas, shapeCanvas, operation, wallW, w
   compositeCtx.restore();
 }
 
-function buildCompositeTexture({ wallW, wallH, masks = [], activeDraft = null }) {
+function buildCompositeTexture({
+  wallW,
+  wallH,
+  masks = [],
+  activeDraft = null,
+  imageCache,
+  onAssetReady
+}) {
   const { canvas: compositeCanvas, ctx: compositeCtx } = createBuffer(wallW, wallH);
   compositeCtx.clearRect(0, 0, wallW, wallH);
 
@@ -185,7 +270,14 @@ function buildCompositeTexture({ wallW, wallH, masks = [], activeDraft = null })
     });
 
   for (const shape of orderedShapes) {
-    const shapeCanvas = renderShape(shape, wallW, wallH);
+    const shapeCanvas = renderShape(
+      shape,
+      wallW,
+      wallH,
+      imageCache,
+      onAssetReady
+    );
+
     applyShapeToComposite(
       compositeCanvas,
       shapeCanvas,
@@ -198,36 +290,15 @@ function buildCompositeTexture({ wallW, wallH, masks = [], activeDraft = null })
   return compositeCanvas;
 }
 
-function drawGrid(ctx, wallW, wallH) {
-  ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,0.25)";
-  ctx.lineWidth = 1;
-  const step = 40;
-
-  for (let x = 0; x <= wallW; x += step) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, wallH);
-    ctx.stroke();
-  }
-
-  for (let y = 0; y <= wallH; y += step) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(wallW, y);
-    ctx.stroke();
-  }
-
-  ctx.restore();
-}
-
 function buildProjectionTexture({
   wallW,
   wallH,
   showGrid,
   showPinkBackground,
   masks,
-  activeDraft
+  activeDraft,
+  imageCache,
+  onAssetReady
 }) {
   const canvas = document.createElement("canvas");
   canvas.width = wallW;
@@ -251,7 +322,9 @@ function buildProjectionTexture({
     wallW,
     wallH,
     masks,
-    activeDraft
+    activeDraft,
+    imageCache,
+    onAssetReady
   });
 
   ctx.save();
@@ -283,6 +356,7 @@ function makeProjectorCamera(projector, aspect) {
   const p = getSafeProjector(projector);
 
   const cam = new THREE.PerspectiveCamera(p.fov, aspect, 0.1, 100);
+  cam.rotation.order = "YXZ";
 
   cam.position.set(p.offsetX, p.offsetY, p.distance);
 
@@ -375,7 +449,7 @@ function GlbDesiredScene({ modelUrl, projectionTexture }) {
           vec2 uv;
           uv.x = vWorldPosition.x / 8.0 + 0.5;
           uv.y = vWorldPosition.y / 5.0 + 0.5;
-          uv.y = 1.0 - uv.y;
+          
 
           if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
             discard;
@@ -422,7 +496,6 @@ function DesiredPass({
   aspect
 }) {
   const { gl } = useThree();
-
   const referenceCamera = useMemo(() => makeReferenceCamera(aspect), [aspect]);
 
   useFrame(() => {
@@ -491,10 +564,7 @@ function useCompensationMaterial(desiredTexture, referenceCamera, aspect) {
           vec3 ndc = refClip.xyz / refClip.w;
           vec2 uv = ndc.xy * 0.5 + 0.5;
           uv.y = 1.0 - uv.y;
-
-          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-            discard;
-          }
+          uv = clamp(uv, 0.0, 1.0);
 
           vec4 color = texture2D(desiredTexture, uv);
           if (color.a < 0.01) {
@@ -669,7 +739,7 @@ function WarpOutputSurface({ texture, warp, wallW, wallH }) {
   );
 }
 
-function OutputPipeline({ state, wallW, wallH, viewportW, viewportH }) {
+function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersion }) {
   const renderW = Math.max(2, Math.floor(viewportW || wallW));
   const renderH = Math.max(2, Math.floor(viewportH || wallH));
 
@@ -689,6 +759,7 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH }) {
 
   const desiredScene = useMemo(() => new THREE.Scene(), []);
   const compensationScene = useMemo(() => new THREE.Scene(), []);
+  const imageCache = useRef(new Map());
 
   const activeDraft = useMemo(() => {
     if (state?.draft) return state.draft;
@@ -713,7 +784,9 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH }) {
         showGrid: state.showGrid,
         showPinkBackground: state.showPinkBackground,
         masks: state.masks,
-        activeDraft
+        activeDraft,
+        imageCache,
+        onAssetReady: assetVersion.bump
       }),
     [
       wallW,
@@ -721,7 +794,8 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH }) {
       state.showGrid,
       state.showPinkBackground,
       state.masks,
-      activeDraft
+      activeDraft,
+      assetVersion.value
     ]
   );
 
@@ -768,6 +842,15 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
   const rootRef = React.useRef(null);
   const [viewport, setViewport] = useState({ width: wallW, height: wallH });
   const [canvasKey, setCanvasKey] = useState(0);
+  const [assetVersionValue, setAssetVersionValue] = useState(0);
+
+  const assetVersion = useMemo(
+    () => ({
+      value: assetVersionValue,
+      bump: () => setAssetVersionValue((v) => v + 1)
+    }),
+    [assetVersionValue]
+  );
 
   useEffect(() => {
     const sync = () => {
@@ -868,6 +951,7 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
           wallH={wallH}
           viewportW={viewport.width}
           viewportH={viewport.height}
+          assetVersion={assetVersion}
         />
       </Canvas>
     </div>

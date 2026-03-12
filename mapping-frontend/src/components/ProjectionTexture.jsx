@@ -37,15 +37,75 @@ function drawPolygonStroke(ctx, pts) {
   ctx.restore();
 }
 
-function getShapeFillStyle(shape) {
-  if (shape?.textureType === "color") {
-    return shape.textureValue || "#ffffff";
+function drawGrid(ctx, wallW, wallH) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,0,0,0.35)";
+  ctx.lineWidth = 1;
+  const step = 50;
+
+  for (let x = 0; x <= wallW; x += step) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, wallH);
+    ctx.stroke();
   }
 
-  return "#ffffff";
+  for (let y = 0; y <= wallH; y += step) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(wallW, y);
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
-function renderShape(shape, wallW, wallH) {
+function getImageCacheKey(shape) {
+  return `${shape?.textureType || "color"}::${shape?.textureValue || ""}`;
+}
+
+function loadImage(src, imageCache, onReady) {
+  if (!src) return null;
+
+  const cached = imageCache.current.get(src);
+  if (cached) {
+    if (cached.status === "loaded") return cached.img;
+    return null;
+  }
+
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+
+  const entry = {
+    status: "loading",
+    img
+  };
+
+  imageCache.current.set(src, entry);
+
+  img.onload = () => {
+    entry.status = "loaded";
+    onReady?.();
+  };
+
+  img.onerror = () => {
+    entry.status = "error";
+    onReady?.();
+  };
+
+  img.src = src;
+
+  return null;
+}
+
+function getLoadedImage(src, imageCache) {
+  if (!src) return null;
+  const cached = imageCache.current.get(src);
+  if (cached?.status === "loaded") return cached.img;
+  return null;
+}
+
+function renderShape(shape, wallW, wallH, imageCache, onAssetReady) {
   const { canvas, ctx } = createBuffer(wallW, wallH);
 
   if (!drawPolygonPath(ctx, shape.points)) {
@@ -53,11 +113,33 @@ function renderShape(shape, wallW, wallH) {
   }
 
   const alpha = typeof shape.opacity === "number" ? shape.opacity : 1;
-  const fillStyle = getShapeFillStyle(shape);
+  const textureType = shape?.textureType || "color";
+  const textureValue = shape?.textureValue || "#ffffff";
 
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = fillStyle;
+
+  if (textureType === "image") {
+    const loadedImg =
+      getLoadedImage(textureValue, imageCache) ||
+      loadImage(textureValue, imageCache, onAssetReady);
+
+    ctx.save();
+    ctx.clip();
+
+    if (loadedImg) {
+      ctx.drawImage(loadedImg, 0, 0, wallW, wallH);
+    } else {
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+    }
+
+    ctx.restore();
+    ctx.restore();
+    return canvas;
+  }
+
+  ctx.fillStyle = textureType === "color" ? textureValue : "#ffffff";
   ctx.fill();
   ctx.restore();
 
@@ -99,7 +181,14 @@ function applyShapeToComposite(
   compositeCtx.restore();
 }
 
-function buildCompositeTexture({ wallW, wallH, masks = [], activeDraft = null }) {
+function buildCompositeTexture({
+  wallW,
+  wallH,
+  masks = [],
+  activeDraft = null,
+  imageCache,
+  onAssetReady
+}) {
   const { canvas: compositeCanvas, ctx: compositeCtx } = createBuffer(wallW, wallH);
   compositeCtx.clearRect(0, 0, wallW, wallH);
 
@@ -116,7 +205,8 @@ function buildCompositeTexture({ wallW, wallH, masks = [], activeDraft = null })
       name: activeDraft.name || "draft",
       type: activeDraft.type || "polygon",
       operation: activeDraft.operation || "add",
-      zIndex: typeof activeDraft.zIndex === "number" ? activeDraft.zIndex : 999999,
+      zIndex:
+        typeof activeDraft.zIndex === "number" ? activeDraft.zIndex : 999999,
       visible: activeDraft.visible,
       opacity: typeof activeDraft.opacity === "number" ? activeDraft.opacity : 1,
       textureType: activeDraft.textureType || "color",
@@ -135,7 +225,14 @@ function buildCompositeTexture({ wallW, wallH, masks = [], activeDraft = null })
     });
 
   for (const shape of orderedShapes) {
-    const shapeCanvas = renderShape(shape, wallW, wallH);
+    const shapeCanvas = renderShape(
+      shape,
+      wallW,
+      wallH,
+      imageCache,
+      onAssetReady
+    );
+
     applyShapeToComposite(
       compositeCanvas,
       shapeCanvas,
@@ -146,29 +243,6 @@ function buildCompositeTexture({ wallW, wallH, masks = [], activeDraft = null })
   }
 
   return compositeCanvas;
-}
-
-function drawGrid(ctx, wallW, wallH) {
-  ctx.save();
-  ctx.strokeStyle = "rgba(255,0,0,0.35)";
-  ctx.lineWidth = 1;
-  const step = 50;
-
-  for (let x = 0; x <= wallW; x += step) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, wallH);
-    ctx.stroke();
-  }
-
-  for (let y = 0; y <= wallH; y += step) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(wallW, y);
-    ctx.stroke();
-  }
-
-  ctx.restore();
 }
 
 export default function ProjectionTexture({
@@ -183,6 +257,9 @@ export default function ProjectionTexture({
   const canvasRef = useRef(document.createElement("canvas"));
   const imgRef = useRef(null);
   const imgLoadedRef = useRef(false);
+  const imageCache = useRef(new Map());
+  const [, forceTick] = useMemo(() => [null, null], []);
+  const rerenderRef = useRef(0);
 
   const texture = useMemo(() => {
     const t = new THREE.CanvasTexture(canvasRef.current);
@@ -190,8 +267,14 @@ export default function ProjectionTexture({
     t.magFilter = THREE.LinearFilter;
     t.wrapS = THREE.ClampToEdgeWrapping;
     t.wrapT = THREE.ClampToEdgeWrapping;
+    t.flipY = false;
     return t;
   }, []);
+
+  const triggerAssetRerender = () => {
+    rerenderRef.current += 1;
+    onTexture?.(texture);
+  };
 
   useEffect(() => {
     const img = new Image();
@@ -200,11 +283,13 @@ export default function ProjectionTexture({
 
     const handleLoad = () => {
       imgLoadedRef.current = true;
+      triggerAssetRerender();
     };
 
     const handleError = () => {
       imgLoadedRef.current = false;
       console.warn("ProjectionTexture: nie udało się wczytać imageUrl:", imageUrl);
+      triggerAssetRerender();
     };
 
     img.addEventListener("load", handleLoad);
@@ -223,6 +308,8 @@ export default function ProjectionTexture({
     canvas.height = wallH;
 
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
     ctx.clearRect(0, 0, wallW, wallH);
 
     const img = imgRef.current;
@@ -243,11 +330,13 @@ export default function ProjectionTexture({
       wallW,
       wallH,
       masks,
-      activeDraft
+      activeDraft,
+      imageCache,
+      onAssetReady: triggerAssetRerender
     });
 
     ctx.save();
-    ctx.globalCompositeOperation = "multiply";
+    ctx.globalCompositeOperation = "source-over";
     ctx.drawImage(compositeTexture, 0, 0);
     ctx.restore();
 
@@ -257,7 +346,17 @@ export default function ProjectionTexture({
 
     texture.needsUpdate = true;
     onTexture?.(texture);
-  }, [wallW, wallH, showGrid, masks, activeDraft, texture, onTexture]);
+  }, [
+    wallW,
+    wallH,
+    showGrid,
+    masks,
+    activeDraft,
+    texture,
+    onTexture,
+    imageUrl,
+    rerenderRef.current
+  ]);
 
   return null;
 }
