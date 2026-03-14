@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid, useGLTF, Edges } from "@react-three/drei";
 import * as THREE from "three";
@@ -25,9 +25,9 @@ function makeProjectorCamera(projector, aspect) {
   const p = getSafeProjector(projector);
 
   const cam = new THREE.PerspectiveCamera(p.fov, aspect, 0.1, 100);
+  cam.rotation.order = "YXZ";
 
   cam.position.set(p.offsetX, p.offsetY, p.distance);
-
   cam.rotation.set(
     degToRad(p.angleX),
     degToRad(p.angleY),
@@ -46,8 +46,9 @@ function useProjectedMaterial(projectionTexture, projector, aspect) {
 
     const projectorCamera = makeProjectorCamera(projector, aspect);
 
-    return new THREE.ShaderMaterial({
+    const material = new THREE.ShaderMaterial({
       transparent: true,
+      depthWrite: false,
       uniforms: {
         baseTexture: { value: projectionTexture },
         projectorViewMatrix: {
@@ -63,7 +64,7 @@ function useProjectedMaterial(projectionTexture, projector, aspect) {
         void main() {
           vec4 worldPos = modelMatrix * vec4(position, 1.0);
           vWorldPosition = worldPos.xyz;
-          gl_Position = projectionMatrix * viewMatrix * worldPos;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: `
@@ -94,6 +95,8 @@ function useProjectedMaterial(projectionTexture, projector, aspect) {
         }
       `
     });
+
+    return material;
   }, [projectionTexture, projector, aspect]);
 }
 
@@ -114,7 +117,12 @@ function ProjectorHelper({ projector }) {
   );
 }
 
-function FittedGlbModel({ modelUrl, projectionTexture, projector, showEdges = true }) {
+function FittedGlbModel({
+  modelUrl,
+  projectionTexture,
+  projector,
+  showEdges = true
+}) {
   const { scene } = useGLTF(modelUrl);
 
   const fit = useMemo(() => {
@@ -146,7 +154,7 @@ function FittedGlbModel({ modelUrl, projectionTexture, projector, showEdges = tr
   const projectionClone = useMemo(() => scene.clone(), [scene]);
   const edgesClone = useMemo(() => scene.clone(), [scene]);
 
-  useMemo(() => {
+  useEffect(() => {
     baseClone.traverse((obj) => {
       if (obj.isMesh) {
         obj.material = new THREE.MeshStandardMaterial({
@@ -158,7 +166,7 @@ function FittedGlbModel({ modelUrl, projectionTexture, projector, showEdges = tr
     });
   }, [baseClone]);
 
-  useMemo(() => {
+  useEffect(() => {
     if (!projectedMaterial) return;
 
     projectionClone.traverse((obj) => {
@@ -166,6 +174,10 @@ function FittedGlbModel({ modelUrl, projectionTexture, projector, showEdges = tr
         obj.material = projectedMaterial;
       }
     });
+
+    return () => {
+      projectedMaterial.dispose();
+    };
   }, [projectionClone, projectedMaterial]);
 
   return (
@@ -211,6 +223,14 @@ function PlanePreview({ projectionTexture, projector }) {
     8 / 5
   );
 
+  useEffect(() => {
+    return () => {
+      if (projectedMaterial) {
+        projectedMaterial.dispose();
+      }
+    };
+  }, [projectedMaterial]);
+
   return (
     <group>
       <mesh position={[0, 0, 0]}>
@@ -228,7 +248,13 @@ function PlanePreview({ projectionTexture, projector }) {
   );
 }
 
-function SceneContent({ renderMode, modelUrl, projectionTexture, projector, showEdges = true }) {
+function SceneContent({
+  renderMode,
+  modelUrl,
+  projectionTexture,
+  projector,
+  showEdges = true
+}) {
   return (
     <>
       <ambientLight intensity={0.9} />

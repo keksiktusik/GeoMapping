@@ -60,10 +60,6 @@ function drawGrid(ctx, wallW, wallH) {
   ctx.restore();
 }
 
-function getImageCacheKey(shape) {
-  return `${shape?.textureType || "color"}::${shape?.textureValue || ""}`;
-}
-
 function loadImage(src, imageCache, onReady) {
   if (!src) return null;
 
@@ -105,7 +101,66 @@ function getLoadedImage(src, imageCache) {
   return null;
 }
 
-function renderShape(shape, wallW, wallH, imageCache, onAssetReady) {
+function loadVideo(src, videoCache, onReady) {
+  if (!src) return null;
+
+  const cached = videoCache.current.get(src);
+  if (cached) {
+    if (cached.status === "loaded" || cached.status === "playing") {
+      return cached.video;
+    }
+    return null;
+  }
+
+  const video = document.createElement("video");
+  video.src = src;
+  video.crossOrigin = "anonymous";
+  video.loop = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+
+  const entry = {
+    status: "loading",
+    video
+  };
+
+  videoCache.current.set(src, entry);
+
+  const markReady = () => {
+    entry.status = "loaded";
+    onReady?.();
+  };
+
+  video.addEventListener("loadeddata", markReady);
+  video.addEventListener("canplay", markReady);
+
+  video.addEventListener("play", () => {
+    entry.status = "playing";
+    onReady?.();
+  });
+
+  video.addEventListener("error", () => {
+    entry.status = "error";
+    onReady?.();
+  });
+
+  video.play().catch(() => {});
+
+  return null;
+}
+
+function getLoadedVideo(src, videoCache) {
+  if (!src) return null;
+  const cached = videoCache.current.get(src);
+  if (!cached) return null;
+  if (cached.status === "loaded" || cached.status === "playing") {
+    return cached.video;
+  }
+  return null;
+}
+
+function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) {
   const { canvas, ctx } = createBuffer(wallW, wallH);
 
   if (!drawPolygonPath(ctx, shape.points)) {
@@ -129,6 +184,26 @@ function renderShape(shape, wallW, wallH, imageCache, onAssetReady) {
 
     if (loadedImg) {
       ctx.drawImage(loadedImg, 0, 0, wallW, wallH);
+    } else {
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+    }
+
+    ctx.restore();
+    ctx.restore();
+    return canvas;
+  }
+
+  if (textureType === "video") {
+    const loadedVideo =
+      getLoadedVideo(textureValue, videoCache) ||
+      loadVideo(textureValue, videoCache, onAssetReady);
+
+    ctx.save();
+    ctx.clip();
+
+    if (loadedVideo && loadedVideo.readyState >= 2) {
+      ctx.drawImage(loadedVideo, 0, 0, wallW, wallH);
     } else {
       ctx.fillStyle = "#ffffff";
       ctx.fill();
@@ -187,6 +262,7 @@ function buildCompositeTexture({
   masks = [],
   activeDraft = null,
   imageCache,
+  videoCache,
   onAssetReady
 }) {
   const { canvas: compositeCanvas, ctx: compositeCtx } = createBuffer(wallW, wallH);
@@ -230,6 +306,7 @@ function buildCompositeTexture({
       wallW,
       wallH,
       imageCache,
+      videoCache,
       onAssetReady
     );
 
@@ -258,8 +335,8 @@ export default function ProjectionTexture({
   const imgRef = useRef(null);
   const imgLoadedRef = useRef(false);
   const imageCache = useRef(new Map());
-  const [, forceTick] = useMemo(() => [null, null], []);
-  const rerenderRef = useRef(0);
+  const videoCache = useRef(new Map());
+  const rerenderTickRef = useRef(0);
 
   const texture = useMemo(() => {
     const t = new THREE.CanvasTexture(canvasRef.current);
@@ -268,12 +345,12 @@ export default function ProjectionTexture({
     t.wrapS = THREE.ClampToEdgeWrapping;
     t.wrapT = THREE.ClampToEdgeWrapping;
     t.flipY = false;
+    t.needsUpdate = true;
     return t;
   }, []);
 
   const triggerAssetRerender = () => {
-    rerenderRef.current += 1;
-    onTexture?.(texture);
+    rerenderTickRef.current += 1;
   };
 
   useEffect(() => {
@@ -303,60 +380,78 @@ export default function ProjectionTexture({
   }, [imageUrl]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    canvas.width = wallW;
-    canvas.height = wallH;
+    return () => {
+      videoCache.current.forEach((entry) => {
+        if (entry?.video) {
+          entry.video.pause();
+          entry.video.src = "";
+          entry.video.load?.();
+        }
+      });
+    };
+  }, []);
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+  useEffect(() => {
+    let rafId = 0;
 
-    ctx.clearRect(0, 0, wallW, wallH);
+    const draw = () => {
+      const canvas = canvasRef.current;
+      canvas.width = wallW;
+      canvas.height = wallH;
 
-    const img = imgRef.current;
-    const loaded = imgLoadedRef.current;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        rafId = requestAnimationFrame(draw);
+        return;
+      }
 
-    if (img && loaded) {
-      ctx.drawImage(img, 0, 0, wallW, wallH);
-    } else {
-      ctx.fillStyle = "#111111";
-      ctx.fillRect(0, 0, wallW, wallH);
-    }
+      ctx.clearRect(0, 0, wallW, wallH);
 
-    if (showGrid) {
-      drawGrid(ctx, wallW, wallH);
-    }
+      const img = imgRef.current;
+      const loaded = imgLoadedRef.current;
 
-    const compositeTexture = buildCompositeTexture({
-      wallW,
-      wallH,
-      masks,
-      activeDraft,
-      imageCache,
-      onAssetReady: triggerAssetRerender
-    });
+      if (img && loaded) {
+        ctx.drawImage(img, 0, 0, wallW, wallH);
+      } else {
+        ctx.fillStyle = "#111111";
+        ctx.fillRect(0, 0, wallW, wallH);
+      }
 
-    ctx.save();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.drawImage(compositeTexture, 0, 0);
-    ctx.restore();
+      if (showGrid) {
+        drawGrid(ctx, wallW, wallH);
+      }
 
-    if (activeDraft?.points && activeDraft.points.length >= 2) {
-      drawPolygonStroke(ctx, activeDraft.points);
-    }
+      const compositeTexture = buildCompositeTexture({
+        wallW,
+        wallH,
+        masks,
+        activeDraft,
+        imageCache,
+        videoCache,
+        onAssetReady: triggerAssetRerender
+      });
 
-    texture.needsUpdate = true;
-    onTexture?.(texture);
-  }, [
-    wallW,
-    wallH,
-    showGrid,
-    masks,
-    activeDraft,
-    texture,
-    onTexture,
-    imageUrl,
-    rerenderRef.current
-  ]);
+      ctx.save();
+      ctx.globalCompositeOperation = "source-over";
+      ctx.drawImage(compositeTexture, 0, 0);
+      ctx.restore();
+
+      if (activeDraft?.points && activeDraft.points.length >= 2) {
+        drawPolygonStroke(ctx, activeDraft.points);
+      }
+
+      texture.needsUpdate = true;
+      onTexture?.(texture);
+
+      rafId = requestAnimationFrame(draw);
+    };
+
+    draw();
+
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [wallW, wallH, showGrid, masks, activeDraft, texture, onTexture, imageUrl]);
 
   return null;
 }

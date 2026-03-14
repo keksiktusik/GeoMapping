@@ -1,5 +1,15 @@
 import { ui } from "../styles/ui";
 
+const DEFAULT_IMAGE_PATH = "/textures/window.jpg";
+const DEFAULT_VIDEO_PATH = "/videos/fasada.mp4";
+
+function getDefaultTextureValue(type, currentValue = "") {
+  if (type === "color") return currentValue?.startsWith("#") ? currentValue : "#ffffff";
+  if (type === "image") return currentValue || DEFAULT_IMAGE_PATH;
+  if (type === "video") return currentValue || DEFAULT_VIDEO_PATH;
+  return currentValue || "";
+}
+
 export default function Toolbar({
   mode,
   setMode,
@@ -34,6 +44,16 @@ export default function Toolbar({
   onReset,
   onExportJson
 }) {
+  const handleTextureTypeChange = (e) => {
+    const nextType = e.target.value;
+    setTextureType(nextType);
+    setTextureValue(getDefaultTextureValue(nextType, ""));
+  };
+
+  const applyDefaultAssetPath = () => {
+    setTextureValue(getDefaultTextureValue(textureType, ""));
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div>
@@ -89,34 +109,82 @@ export default function Toolbar({
         <select
           style={ui.input}
           value={textureType}
-          onChange={(e) => setTextureType(e.target.value)}
+          onChange={handleTextureTypeChange}
         >
           <option value="color">color</option>
-          <option value="image">image (future)</option>
-          <option value="video">video (future)</option>
+          <option value="image">image</option>
+          <option value="video">video</option>
         </select>
       </div>
 
       <div>
         <div style={ui.label}>Material value</div>
+
         {textureType === "color" ? (
-          <input
-            style={{ ...ui.input, height: 42, padding: 4 }}
-            type="color"
-            value={textureValue || "#ffffff"}
-            onChange={(e) => setTextureValue(e.target.value)}
-          />
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              style={{ ...ui.input, height: 42, padding: 4, minWidth: 64 }}
+              type="color"
+              value={textureValue || "#ffffff"}
+              onChange={(e) => setTextureValue(e.target.value)}
+            />
+
+            <input
+              style={ui.input}
+              value={textureValue || "#ffffff"}
+              onChange={(e) => setTextureValue(e.target.value)}
+              placeholder="#ffffff"
+            />
+          </div>
         ) : (
-          <input
-            style={ui.input}
-            value={textureValue}
-            onChange={(e) => setTextureValue(e.target.value)}
-            placeholder={
-              textureType === "image"
-                ? "np. /textures/window.jpg"
-                : "np. /video/window.mp4"
-            }
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <input
+              style={ui.input}
+              value={textureValue || ""}
+              onChange={(e) => setTextureValue(e.target.value)}
+              placeholder={
+                textureType === "image"
+                  ? "np. /textures/window.jpg"
+                  : "np. /videos/fasada.mp4"
+              }
+            />
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                style={ui.button}
+                type="button"
+                onClick={applyDefaultAssetPath}
+              >
+                Ustaw domyślną ścieżkę
+              </button>
+
+              {textureType === "image" && (
+                <div
+                  style={{
+                    fontSize: 12,
+                    opacity: 0.8,
+                    display: "flex",
+                    alignItems: "center"
+                  }}
+                >
+                  np. {DEFAULT_IMAGE_PATH}
+                </div>
+              )}
+
+              {textureType === "video" && (
+                <div
+                  style={{
+                    fontSize: 12,
+                    opacity: 0.8,
+                    display: "flex",
+                    alignItems: "center"
+                  }}
+                >
+                  np. {DEFAULT_VIDEO_PATH}
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
