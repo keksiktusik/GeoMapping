@@ -156,7 +156,66 @@ function loadImage(src, imageCache, onReady) {
   return null;
 }
 
-function renderShape(shape, wallW, wallH, imageCache, onAssetReady) {
+function getLoadedVideo(src, videoCache) {
+  if (!src) return null;
+  const cached = videoCache.current.get(src);
+  if (!cached) return null;
+  if (cached.status === "loaded" || cached.status === "playing") {
+    return cached.video;
+  }
+  return null;
+}
+
+function loadVideo(src, videoCache, onReady) {
+  if (!src) return null;
+
+  const cached = videoCache.current.get(src);
+  if (cached) {
+    if (cached.status === "loaded" || cached.status === "playing") {
+      return cached.video;
+    }
+    return null;
+  }
+
+  const video = document.createElement("video");
+  video.src = src;
+  video.crossOrigin = "anonymous";
+  video.loop = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+
+  const entry = {
+    status: "loading",
+    video
+  };
+
+  videoCache.current.set(src, entry);
+
+  const markReady = () => {
+    entry.status = "loaded";
+    onReady?.();
+  };
+
+  video.addEventListener("loadeddata", markReady);
+  video.addEventListener("canplay", markReady);
+
+  video.addEventListener("play", () => {
+    entry.status = "playing";
+    onReady?.();
+  });
+
+  video.addEventListener("error", () => {
+    entry.status = "error";
+    onReady?.();
+  });
+
+  video.play().catch(() => {});
+
+  return null;
+}
+
+function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) {
   const { canvas, ctx } = createBuffer(wallW, wallH);
 
   if (!drawPolygonPath(ctx, shape.points)) {
@@ -180,6 +239,26 @@ function renderShape(shape, wallW, wallH, imageCache, onAssetReady) {
 
     if (loadedImg) {
       ctx.drawImage(loadedImg, 0, 0, wallW, wallH);
+    } else {
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+    }
+
+    ctx.restore();
+    ctx.restore();
+    return canvas;
+  }
+
+  if (textureType === "video") {
+    const loadedVideo =
+      getLoadedVideo(textureValue, videoCache) ||
+      loadVideo(textureValue, videoCache, onAssetReady);
+
+    ctx.save();
+    ctx.clip();
+
+    if (loadedVideo && loadedVideo.readyState >= 2) {
+      ctx.drawImage(loadedVideo, 0, 0, wallW, wallH);
     } else {
       ctx.fillStyle = "#ffffff";
       ctx.fill();
@@ -232,6 +311,7 @@ function buildCompositeTexture({
   masks = [],
   activeDraft = null,
   imageCache,
+  videoCache,
   onAssetReady
 }) {
   const { canvas: compositeCanvas, ctx: compositeCtx } = createBuffer(wallW, wallH);
@@ -275,6 +355,7 @@ function buildCompositeTexture({
       wallW,
       wallH,
       imageCache,
+      videoCache,
       onAssetReady
     );
 
@@ -290,7 +371,7 @@ function buildCompositeTexture({
   return compositeCanvas;
 }
 
-function buildProjectionTexture({
+function createProjectionTextureAsset({
   wallW,
   wallH,
   showGrid,
@@ -298,6 +379,7 @@ function buildProjectionTexture({
   masks,
   activeDraft,
   imageCache,
+  videoCache,
   onAssetReady
 }) {
   const canvas = document.createElement("canvas");
@@ -307,30 +389,35 @@ function buildProjectionTexture({
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
-  ctx.clearRect(0, 0, wallW, wallH);
+  const redraw = () => {
+    ctx.clearRect(0, 0, wallW, wallH);
 
-  if (showPinkBackground) {
-    ctx.fillStyle = "#ff4fbf";
-    ctx.fillRect(0, 0, wallW, wallH);
-  }
+    if (showPinkBackground) {
+      ctx.fillStyle = "#ff4fbf";
+      ctx.fillRect(0, 0, wallW, wallH);
+    }
 
-  if (showGrid) {
-    drawGrid(ctx, wallW, wallH);
-  }
+    if (showGrid) {
+      drawGrid(ctx, wallW, wallH);
+    }
 
-  const compositeTexture = buildCompositeTexture({
-    wallW,
-    wallH,
-    masks,
-    activeDraft,
-    imageCache,
-    onAssetReady
-  });
+    const compositeTexture = buildCompositeTexture({
+      wallW,
+      wallH,
+      masks,
+      activeDraft,
+      imageCache,
+      videoCache,
+      onAssetReady
+    });
 
-  ctx.save();
-  ctx.globalCompositeOperation = "source-over";
-  ctx.drawImage(compositeTexture, 0, 0);
-  ctx.restore();
+    ctx.save();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(compositeTexture, 0, 0);
+    ctx.restore();
+  };
+
+  redraw();
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
@@ -340,7 +427,11 @@ function buildProjectionTexture({
   texture.flipY = false;
   texture.needsUpdate = true;
 
-  return texture;
+  return {
+    canvas,
+    texture,
+    redraw
+  };
 }
 
 function makeReferenceCamera(aspect) {
@@ -449,7 +540,6 @@ function GlbDesiredScene({ modelUrl, projectionTexture }) {
           vec2 uv;
           uv.x = vWorldPosition.x / 8.0 + 0.5;
           uv.y = vWorldPosition.y / 5.0 + 0.5;
-          
 
           if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
             discard;
@@ -760,6 +850,7 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
   const desiredScene = useMemo(() => new THREE.Scene(), []);
   const compensationScene = useMemo(() => new THREE.Scene(), []);
   const imageCache = useRef(new Map());
+  const videoCache = useRef(new Map());
 
   const activeDraft = useMemo(() => {
     if (state?.draft) return state.draft;
@@ -776,9 +867,9 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
     };
   }, [state]);
 
-  const projectionTexture = useMemo(
+  const projectionAsset = useMemo(
     () =>
-      buildProjectionTexture({
+      createProjectionTextureAsset({
         wallW,
         wallH,
         showGrid: state.showGrid,
@@ -786,6 +877,7 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
         masks: state.masks,
         activeDraft,
         imageCache,
+        videoCache,
         onAssetReady: assetVersion.bump
       }),
     [
@@ -799,6 +891,32 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
     ]
   );
 
+  useEffect(() => {
+    return () => {
+      if (projectionAsset?.texture) {
+        projectionAsset.texture.dispose();
+      }
+    };
+  }, [projectionAsset]);
+
+  useEffect(() => {
+    return () => {
+      videoCache.current.forEach((entry) => {
+        if (entry?.video) {
+          entry.video.pause();
+          entry.video.src = "";
+          entry.video.load?.();
+        }
+      });
+    };
+  }, []);
+
+  useFrame(() => {
+    if (!projectionAsset) return;
+    projectionAsset.redraw();
+    projectionAsset.texture.needsUpdate = true;
+  });
+
   const aspect = renderW / renderH;
   const referenceCamera = useMemo(() => makeReferenceCamera(aspect), [aspect]);
 
@@ -810,7 +928,7 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
         desiredScene={desiredScene}
         desiredTarget={desiredTarget}
         renderMode={state.renderMode}
-        projectionTexture={projectionTexture}
+        projectionTexture={projectionAsset?.texture || null}
         aspect={aspect}
       />
 

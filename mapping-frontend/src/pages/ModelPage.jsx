@@ -24,6 +24,23 @@ const WALL_W = 800;
 const WALL_H = 500;
 const MODEL_URL = "/models/fasada.glb";
 const STORAGE_OUTPUT = "mapping_output_state_v1";
+const DEFAULT_VIDEO_PATH = "/videos/fasada.mp4";
+
+function normalizeTextureValue(type, value) {
+  if (type === "color") {
+    return value || "#ffffff";
+  }
+
+  if (type === "image") {
+    return value || "/projection.jpg";
+  }
+
+  if (type === "video") {
+    return value || DEFAULT_VIDEO_PATH;
+  }
+
+  return value || "#ffffff";
+}
 
 export default function ModelPage() {
   const isOutput =
@@ -70,7 +87,7 @@ export default function ModelPage() {
   const [locked, setLocked] = useState(false);
   const [layerName, setLayerName] = useState("default");
 
-  // NOWE: materiał projekcji maski
+  // materiał projekcji maski
   const [textureType, setTextureType] = useState("color");
   const [textureValue, setTextureValue] = useState("#ffffff");
 
@@ -112,6 +129,11 @@ export default function ModelPage() {
     [selectedMaskId, hasPolygon, maskName]
   );
 
+  const normalizedTextureValue = useMemo(
+    () => normalizeTextureValue(textureType, textureValue),
+    [textureType, textureValue]
+  );
+
   const activeDraft = useMemo(
     () => ({
       name: maskName,
@@ -122,7 +144,7 @@ export default function ModelPage() {
       locked,
       layerName,
       textureType,
-      textureValue,
+      textureValue: normalizedTextureValue,
       points,
       opacity,
       isClosed
@@ -136,7 +158,7 @@ export default function ModelPage() {
       locked,
       layerName,
       textureType,
-      textureValue,
+      normalizedTextureValue,
       points,
       opacity,
       isClosed
@@ -174,7 +196,7 @@ export default function ModelPage() {
       locked,
       layerName,
       textureType,
-      textureValue,
+      textureValue: normalizedTextureValue,
       opacity,
       points: points.map((p) => ({
         x: Math.round(p.x),
@@ -198,7 +220,7 @@ export default function ModelPage() {
       locked,
       layerName,
       textureType,
-      textureValue,
+      textureValue: normalizedTextureValue,
       opacity,
       points: points.map((p) => ({
         x: Math.round(p.x),
@@ -233,7 +255,7 @@ export default function ModelPage() {
       locked,
       layerName,
       textureType,
-      textureValue,
+      textureValue: normalizedTextureValue,
       opacity,
       points: points.map((p) => ({
         x: Math.round(p.x),
@@ -280,8 +302,16 @@ export default function ModelPage() {
     setVisible(mask.visible !== false);
     setLocked(Boolean(mask.locked));
     setLayerName(mask.layerName || "default");
-    setTextureType(mask.textureType || "color");
-    setTextureValue(mask.textureValue || "#ffffff");
+
+    const nextTextureType = mask.textureType || "color";
+    const nextTextureValue = normalizeTextureValue(
+      nextTextureType,
+      mask.textureValue
+    );
+
+    setTextureType(nextTextureType);
+    setTextureValue(nextTextureValue);
+
     setPoints(Array.isArray(mask.points) ? mask.points : []);
     setOpacity(typeof mask.opacity === "number" ? mask.opacity : 0.35);
     setIsClosed(true);
@@ -292,6 +322,10 @@ export default function ModelPage() {
     e.preventDefault();
     resetDraft();
   };
+
+  useEffect(() => {
+    setTextureValue((prev) => normalizeTextureValue(textureType, prev));
+  }, [textureType]);
 
   // ===== SYNC: Editor -> localStorage (dla output okna) =====
   useEffect(() => {
@@ -319,7 +353,7 @@ export default function ModelPage() {
             locked,
             layerName,
             textureType,
-            textureValue,
+            textureValue: normalizedTextureValue,
             points,
             opacity,
             isClosed
@@ -348,7 +382,7 @@ export default function ModelPage() {
     locked,
     layerName,
     textureType,
-    textureValue
+    normalizedTextureValue
   ]);
 
   // ===== OUTPUT VIEW (projektor) =====
@@ -383,6 +417,7 @@ export default function ModelPage() {
         showGrid={showGrid}
         masks={masks}
         activeDraft={activeDraft}
+        imageUrl="/projection.jpg"
         onTexture={setProjectionTexture}
       />
 
