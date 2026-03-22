@@ -27,47 +27,48 @@ const STORAGE_OUTPUT = "mapping_output_state_v1";
 const DEFAULT_VIDEO_PATH = "/videos/fasada.mp4";
 
 function normalizeTextureValue(type, value) {
-  if (type === "color") {
-    return value || "#ffffff";
-  }
-
-  if (type === "image") {
-    return value || "/projection.jpg";
-  }
-
-  if (type === "video") {
-    return value || DEFAULT_VIDEO_PATH;
-  }
-
+  if (type === "color") return value || "#ffffff";
+  if (type === "image") return value || "/projection.jpg";
+  if (type === "video") return value || DEFAULT_VIDEO_PATH;
   return value || "#ffffff";
+}
+
+function createMeshWarp(w, h, cols = 5, rows = 5) {
+  const points = [];
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      points.push({
+        x: (col / (cols - 1)) * w,
+        y: (row / (rows - 1)) * h,
+        pinned: false
+      });
+    }
+  }
+
+  return {
+    mode: "mesh",
+    cols,
+    rows,
+    points
+  };
 }
 
 export default function ModelPage() {
   const isOutput =
     new URLSearchParams(window.location.search).get("output") === "1";
 
-  // UI / preview
-  const [renderMode, setRenderMode] = useState("plane"); // "plane" | "glb"
-
-  // editor state
-  const [mode, setMode] = useState("draw"); // draw/edit
+  const [renderMode, setRenderMode] = useState("plane");
+  const [mode, setMode] = useState("draw");
   const [points, setPoints] = useState([]);
   const [isClosed, setIsClosed] = useState(false);
 
-  // settings
   const [opacity, setOpacity] = useState(0.35);
   const [showGrid, setShowGrid] = useState(false);
   const [showPinkBackground, setShowPinkBackground] = useState(true);
 
-  // warp / keystone
-  const [warp, setWarp] = useState({
-    tl: { x: 0, y: 0 },
-    tr: { x: WALL_W, y: 0 },
-    br: { x: WALL_W, y: WALL_H },
-    bl: { x: 0, y: WALL_H }
-  });
+  const [warp, setWarp] = useState(() => createMeshWarp(WALL_W, WALL_H, 5, 5));
 
-  // projector settings
   const [projector, setProjector] = useState({
     distance: 2.5,
     offsetX: 0,
@@ -78,7 +79,6 @@ export default function ModelPage() {
     fov: 45
   });
 
-  // mask data
   const [maskName, setMaskName] = useState("");
   const [maskType, setMaskType] = useState("window");
   const [operation, setOperation] = useState("add");
@@ -87,21 +87,15 @@ export default function ModelPage() {
   const [locked, setLocked] = useState(false);
   const [layerName, setLayerName] = useState("default");
 
-  // materiał projekcji maski
   const [textureType, setTextureType] = useState("color");
   const [textureValue, setTextureValue] = useState("#ffffff");
 
-  // saved masks
   const [masks, setMasks] = useState([]);
   const [selectedMaskId, setSelectedMaskId] = useState(null);
 
-  // output texture (canvas → three.js)
   const [projectionTexture, setProjectionTexture] = useState(null);
-
-  // simple backend badge
   const [backendStatus] = useState("online");
 
-  // ===== load masks =====
   useEffect(() => {
     (async () => {
       try {
@@ -231,9 +225,7 @@ export default function ModelPage() {
     try {
       const created = await createMask(MODEL_ID, payload);
       setMasks((prev) =>
-        [...prev, created].sort(
-          (a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)
-        )
+        [...prev, created].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
       );
       setSelectedMaskId(created.id);
       setMode("edit");
@@ -327,7 +319,6 @@ export default function ModelPage() {
     setTextureValue((prev) => normalizeTextureValue(textureType, prev));
   }, [textureType]);
 
-  // ===== SYNC: Editor -> localStorage (dla output okna) =====
   useEffect(() => {
     if (isOutput) return;
 
@@ -385,7 +376,6 @@ export default function ModelPage() {
     normalizedTextureValue
   ]);
 
-  // ===== OUTPUT VIEW (projektor) =====
   if (isOutput) {
     return (
       <div style={{ width: "100vw", height: "100vh", background: "black" }}>
@@ -528,12 +518,12 @@ export default function ModelPage() {
             />
           </SidebarPanel>
 
-          <SidebarPanel title="Warp / Keystone">
+          <SidebarPanel title="Advanced Warp / Mesh">
             <WarpEditor
               warp={warp}
               setWarp={setWarp}
-              wallW={300}
-              wallH={220}
+              wallW={WALL_W}
+              wallH={WALL_H}
             />
           </SidebarPanel>
         </div>
