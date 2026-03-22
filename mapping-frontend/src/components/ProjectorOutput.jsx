@@ -7,6 +7,51 @@ const STORAGE_KEY = "mapping_output_state_v1";
 const MODEL_URL = "/models/fasada.glb";
 const MIN_DISTANCE = 0.5;
 
+function createMeshWarp(w, h, cols = 5, rows = 5) {
+  const points = [];
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      points.push({
+        x: (col / (cols - 1)) * w,
+        y: (row / (rows - 1)) * h
+      });
+    }
+  }
+
+  return {
+    mode: "mesh",
+    cols,
+    rows,
+    points
+  };
+}
+
+function ensureMeshWarp(warp, wallW, wallH) {
+  if (
+    warp?.mode === "mesh" &&
+    Array.isArray(warp?.points) &&
+    warp.points.length >= 4 &&
+    Number(warp?.cols) >= 2 &&
+    Number(warp?.rows) >= 2
+  ) {
+    return warp;
+  }
+
+  // fallback dla starego 4-corner warp
+  const tl = warp?.tl || { x: 0, y: 0 };
+  const tr = warp?.tr || { x: wallW, y: 0 };
+  const br = warp?.br || { x: wallW, y: wallH };
+  const bl = warp?.bl || { x: 0, y: wallH };
+
+  return {
+    mode: "mesh",
+    cols: 2,
+    rows: 2,
+    points: [tl, tr, bl, br]
+  };
+}
+
 function getDefaultState() {
   return {
     points: [],
@@ -29,12 +74,7 @@ function getDefaultState() {
       opacity: 1,
       isClosed: false
     },
-    warp: {
-      tl: { x: 0, y: 0 },
-      tr: { x: 800, y: 0 },
-      br: { x: 800, y: 500 },
-      bl: { x: 0, y: 500 }
-    },
+    warp: createMeshWarp(800, 500, 5, 5),
     renderMode: "plane",
     projector: {
       distance: 5,
@@ -787,31 +827,54 @@ function CompensationPass({
 }
 
 function createWarpGeometry(warp, wallW, wallH) {
-  const tl = warp?.tl || { x: 0, y: 0 };
-  const tr = warp?.tr || { x: wallW, y: 0 };
-  const br = warp?.br || { x: wallW, y: wallH };
-  const bl = warp?.bl || { x: 0, y: wallH };
+  const mesh = ensureMeshWarp(warp, wallW, wallH);
+  const cols = Number(mesh.cols);
+  const rows = Number(mesh.rows);
+  const points = Array.isArray(mesh.points) ? mesh.points : [];
 
-  const positions = new Float32Array([
-    (tl.x / wallW) * 2 - 1, 1 - (tl.y / wallH) * 2, 0,
-    (tr.x / wallW) * 2 - 1, 1 - (tr.y / wallH) * 2, 0,
-    (bl.x / wallW) * 2 - 1, 1 - (bl.y / wallH) * 2, 0,
-    (br.x / wallW) * 2 - 1, 1 - (br.y / wallH) * 2, 0
-  ]);
+  const vertices = [];
+  const uvs = [];
+  const indices = [];
 
-  const uvs = new Float32Array([
-    0, 1,
-    1, 1,
-    0, 0,
-    1, 0
-  ]);
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const i = row * cols + col;
+      const p = points[i] || { x: 0, y: 0 };
 
-  const indices = [0, 2, 1, 2, 3, 1];
+      const nx = (p.x / wallW) * 2 - 1;
+      const ny = 1 - (p.y / wallH) * 2;
+
+      vertices.push(nx, ny, 0);
+
+      const u = col / (cols - 1);
+      const v = 1 - row / (rows - 1);
+      uvs.push(u, v);
+    }
+  }
+
+  for (let row = 0; row < rows - 1; row += 1) {
+    for (let col = 0; col < cols - 1; col += 1) {
+      const a = row * cols + col;
+      const b = a + 1;
+      const c = a + cols;
+      const d = c + 1;
+
+      indices.push(a, c, b);
+      indices.push(c, d, b);
+    }
+  }
 
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(vertices, 3)
+  );
+  geometry.setAttribute(
+    "uv",
+    new THREE.Float32BufferAttribute(uvs, 2)
+  );
   geometry.setIndex(indices);
+  geometry.computeVertexNormals();
 
   return geometry;
 }
@@ -821,6 +884,12 @@ function WarpOutputSurface({ texture, warp, wallW, wallH }) {
     () => createWarpGeometry(warp, wallW, wallH),
     [warp, wallW, wallH]
   );
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
 
   return (
     <mesh geometry={geometry}>
@@ -953,9 +1022,15 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
 }
 
 export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
-  const [state, setState] = useState(() =>
-    safeParse(localStorage.getItem(STORAGE_KEY), getDefaultState())
-  );
+  const [state, setState] = useState(() => {
+    const parsed = safeParse(localStorage.getItem(STORAGE_KEY), getDefaultState());
+
+    return {
+      ...parsed,
+      warp: ensureMeshWarp(parsed?.warp, wallW, wallH),
+      projector: getSafeProjector(parsed?.projector || {})
+    };
+  });
 
   const rootRef = React.useRef(null);
   const [viewport, setViewport] = useState({ width: wallW, height: wallH });
@@ -979,6 +1054,7 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
 
       setState({
         ...nextState,
+        warp: ensureMeshWarp(nextState?.warp, wallW, wallH),
         projector: getSafeProjector(nextState?.projector || {})
       });
     };
@@ -992,7 +1068,7 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
       window.removeEventListener("storage", sync);
       clearInterval(interval);
     };
-  }, []);
+  }, [wallW, wallH]);
 
   useEffect(() => {
     const updateSize = () => {
