@@ -14,7 +14,8 @@ function createMeshWarp(w, h, cols = 5, rows = 5) {
     for (let col = 0; col < cols; col += 1) {
       points.push({
         x: (col / (cols - 1)) * w,
-        y: (row / (rows - 1)) * h
+        y: (row / (rows - 1)) * h,
+        pinned: false
       });
     }
   }
@@ -27,7 +28,7 @@ function createMeshWarp(w, h, cols = 5, rows = 5) {
   };
 }
 
-function ensureMeshWarp(warp, wallW, wallH) {
+function ensureMeshWarp(warp, wallW, wallH, cols = 5, rows = 5) {
   if (
     warp?.mode === "mesh" &&
     Array.isArray(warp?.points) &&
@@ -38,18 +39,21 @@ function ensureMeshWarp(warp, wallW, wallH) {
     return warp;
   }
 
-  // fallback dla starego 4-corner warp
   const tl = warp?.tl || { x: 0, y: 0 };
   const tr = warp?.tr || { x: wallW, y: 0 };
   const br = warp?.br || { x: wallW, y: wallH };
   const bl = warp?.bl || { x: 0, y: wallH };
 
-  return {
-    mode: "mesh",
-    cols: 2,
-    rows: 2,
-    points: [tl, tr, bl, br]
-  };
+  if (warp?.tl || warp?.tr || warp?.br || warp?.bl) {
+    return {
+      mode: "mesh",
+      cols: 2,
+      rows: 2,
+      points: [tl, tr, bl, br]
+    };
+  }
+
+  return createMeshWarp(wallW, wallH, cols, rows);
 }
 
 function getDefaultState() {
@@ -61,6 +65,7 @@ function getDefaultState() {
     showPinkBackground: true,
     masks: [],
     draft: {
+      id: "__draft__",
       name: "",
       type: "polygon",
       operation: "add",
@@ -72,8 +77,11 @@ function getDefaultState() {
       textureValue: "#ffffff",
       points: [],
       opacity: 1,
-      isClosed: false
+      isClosed: false,
+      localWarp: createMeshWarp(800, 500, 4, 4)
     },
+    maskWarps: {},
+    draftLocalWarp: createMeshWarp(800, 500, 4, 4),
     warp: createMeshWarp(800, 500, 5, 5),
     renderMode: "plane",
     projector: {
@@ -192,7 +200,6 @@ function loadImage(src, imageCache, onReady) {
   };
 
   img.src = src;
-
   return null;
 }
 
@@ -251,8 +258,126 @@ function loadVideo(src, videoCache, onReady) {
   });
 
   video.play().catch(() => {});
-
   return null;
+}
+
+function drawImageTriangle(ctx, image, srcTri, dstTri) {
+  const [s0, s1, s2] = srcTri;
+  const [d0, d1, d2] = dstTri;
+
+  const denom =
+    s0.x * (s1.y - s2.y) +
+    s1.x * (s2.y - s0.y) +
+    s2.x * (s0.y - s1.y);
+
+  if (Math.abs(denom) < 1e-6) return;
+
+  const a =
+    (d0.x * (s1.y - s2.y) +
+      d1.x * (s2.y - s0.y) +
+      d2.x * (s0.y - s1.y)) /
+    denom;
+
+  const b =
+    (d0.y * (s1.y - s2.y) +
+      d1.y * (s2.y - s0.y) +
+      d2.y * (s0.y - s1.y)) /
+    denom;
+
+  const c =
+    (d0.x * (s2.x - s1.x) +
+      d1.x * (s0.x - s2.x) +
+      d2.x * (s1.x - s0.x)) /
+    denom;
+
+  const d =
+    (d0.y * (s2.x - s1.x) +
+      d1.y * (s0.x - s2.x) +
+      d2.y * (s1.x - s0.x)) /
+    denom;
+
+  const e =
+    (d0.x * (s1.x * s2.y - s2.x * s1.y) +
+      d1.x * (s2.x * s0.y - s0.x * s2.y) +
+      d2.x * (s0.x * s1.y - s1.x * s0.y)) /
+    denom;
+
+  const f =
+    (d0.y * (s1.x * s2.y - s2.x * s1.y) +
+      d1.y * (s2.x * s0.y - s0.x * s2.y) +
+      d2.y * (s0.x * s1.y - s1.x * s0.y)) /
+    denom;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(d0.x, d0.y);
+  ctx.lineTo(d1.x, d1.y);
+  ctx.lineTo(d2.x, d2.y);
+  ctx.closePath();
+  ctx.clip();
+
+  ctx.setTransform(a, b, c, d, e, f);
+  ctx.drawImage(image, 0, 0);
+
+  ctx.restore();
+}
+
+function applyMeshWarpToCanvas(sourceCanvas, warp, wallW, wallH) {
+  const mesh = ensureMeshWarp(warp, wallW, wallH, 4, 4);
+  const { cols, rows, points } = mesh;
+
+  const { canvas: outCanvas, ctx } = createBuffer(wallW, wallH);
+  const getPoint = (col, row) => points[row * cols + col];
+
+  for (let row = 0; row < rows - 1; row += 1) {
+    for (let col = 0; col < cols - 1; col += 1) {
+      const sx0 = (col / (cols - 1)) * wallW;
+      const sy0 = (row / (rows - 1)) * wallH;
+      const sx1 = ((col + 1) / (cols - 1)) * wallW;
+      const sy1 = sy0;
+      const sx2 = sx0;
+      const sy2 = ((row + 1) / (rows - 1)) * wallH;
+      const sx3 = sx1;
+      const sy3 = sy2;
+
+      const p00 = getPoint(col, row);
+      const p10 = getPoint(col + 1, row);
+      const p01 = getPoint(col, row + 1);
+      const p11 = getPoint(col + 1, row + 1);
+
+      drawImageTriangle(
+        ctx,
+        sourceCanvas,
+        [
+          { x: sx0, y: sy0 },
+          { x: sx1, y: sy1 },
+          { x: sx2, y: sy2 }
+        ],
+        [
+          { x: p00.x, y: p00.y },
+          { x: p10.x, y: p10.y },
+          { x: p01.x, y: p01.y }
+        ]
+      );
+
+      drawImageTriangle(
+        ctx,
+        sourceCanvas,
+        [
+          { x: sx2, y: sy2 },
+          { x: sx1, y: sy1 },
+          { x: sx3, y: sy3 }
+        ],
+        [
+          { x: p01.x, y: p01.y },
+          { x: p10.x, y: p10.y },
+          { x: p11.x, y: p11.y }
+        ]
+      );
+    }
+  }
+
+  return outCanvas;
 }
 
 function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) {
@@ -286,7 +411,10 @@ function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) 
 
     ctx.restore();
     ctx.restore();
-    return canvas;
+
+    return shape?.localWarp
+      ? applyMeshWarpToCanvas(canvas, shape.localWarp, wallW, wallH)
+      : canvas;
   }
 
   if (textureType === "video") {
@@ -306,14 +434,19 @@ function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) 
 
     ctx.restore();
     ctx.restore();
-    return canvas;
+
+    return shape?.localWarp
+      ? applyMeshWarpToCanvas(canvas, shape.localWarp, wallW, wallH)
+      : canvas;
   }
 
   ctx.fillStyle = textureType === "color" ? textureValue : "#ffffff";
   ctx.fill();
   ctx.restore();
 
-  return canvas;
+  return shape?.localWarp
+    ? applyMeshWarpToCanvas(canvas, shape.localWarp, wallW, wallH)
+    : canvas;
 }
 
 function applyShapeToComposite(compositeCanvas, shapeCanvas, operation, wallW, wallH) {
@@ -357,7 +490,11 @@ function buildCompositeTexture({
   const { canvas: compositeCanvas, ctx: compositeCtx } = createBuffer(wallW, wallH);
   compositeCtx.clearRect(0, 0, wallW, wallH);
 
-  const allShapes = [...(masks || [])];
+  let allShapes = [...(masks || [])];
+
+  if (activeDraft?.id !== undefined && activeDraft?.id !== null) {
+    allShapes = allShapes.filter((shape) => shape?.id !== activeDraft.id);
+  }
 
   if (
     activeDraft?.isClosed &&
@@ -366,7 +503,7 @@ function buildCompositeTexture({
     activeDraft.visible !== false
   ) {
     allShapes.push({
-      id: "__draft__",
+      id: activeDraft.id ?? "__draft__",
       name: activeDraft.name || "draft",
       type: activeDraft.type || "polygon",
       operation: activeDraft.operation || "add",
@@ -376,7 +513,8 @@ function buildCompositeTexture({
       opacity: typeof activeDraft.opacity === "number" ? activeDraft.opacity : 1,
       textureType: activeDraft.textureType || "color",
       textureValue: activeDraft.textureValue || "#ffffff",
-      points: activeDraft.points
+      points: activeDraft.points,
+      localWarp: activeDraft.localWarp || null
     });
   }
 
@@ -827,7 +965,7 @@ function CompensationPass({
 }
 
 function createWarpGeometry(warp, wallW, wallH) {
-  const mesh = ensureMeshWarp(warp, wallW, wallH);
+  const mesh = ensureMeshWarp(warp, wallW, wallH, 5, 5);
   const cols = Number(mesh.cols);
   const rows = Number(mesh.rows);
   const points = Array.isArray(mesh.points) ? mesh.points : [];
@@ -925,6 +1063,7 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
     if (state?.draft) return state.draft;
 
     return {
+      id: "__draft__",
       points: state.points || [],
       opacity: typeof state.opacity === "number" ? state.opacity : 1,
       operation: "add",
@@ -932,9 +1071,10 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
       visible: true,
       textureType: "color",
       textureValue: "#ffffff",
-      isClosed: Boolean(state.isClosed)
+      isClosed: Boolean(state.isClosed),
+      localWarp: state?.draftLocalWarp || createMeshWarp(wallW, wallH, 4, 4)
     };
-  }, [state]);
+  }, [state, wallW, wallH]);
 
   const projectionAsset = useMemo(
     () =>
@@ -1027,7 +1167,17 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
 
     return {
       ...parsed,
-      warp: ensureMeshWarp(parsed?.warp, wallW, wallH),
+      masks: Array.isArray(parsed?.masks) ? parsed.masks : [],
+      draft:
+        parsed?.draft
+          ? {
+              ...parsed.draft,
+              localWarp: parsed?.draft?.localWarp || createMeshWarp(wallW, wallH, 4, 4)
+            }
+          : getDefaultState().draft,
+      draftLocalWarp:
+        parsed?.draftLocalWarp || createMeshWarp(wallW, wallH, 4, 4),
+      warp: ensureMeshWarp(parsed?.warp, wallW, wallH, 5, 5),
       projector: getSafeProjector(parsed?.projector || {})
     };
   });
@@ -1054,7 +1204,18 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
 
       setState({
         ...nextState,
-        warp: ensureMeshWarp(nextState?.warp, wallW, wallH),
+        masks: Array.isArray(nextState?.masks) ? nextState.masks : [],
+        draft:
+          nextState?.draft
+            ? {
+                ...nextState.draft,
+                localWarp:
+                  nextState?.draft?.localWarp || createMeshWarp(wallW, wallH, 4, 4)
+              }
+            : getDefaultState().draft,
+        draftLocalWarp:
+          nextState?.draftLocalWarp || createMeshWarp(wallW, wallH, 4, 4),
+        warp: ensureMeshWarp(nextState?.warp, wallW, wallH, 5, 5),
         projector: getSafeProjector(nextState?.projector || {})
       });
     };
