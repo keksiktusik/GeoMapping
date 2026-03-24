@@ -18,13 +18,20 @@ import ProjectorSettings from "../components/ProjectorSettings";
 import WarpEditor from "../components/WarpEditor";
 import { ui } from "../styles/ui";
 
-// ===== stałe poza komponentem =====
 const MODEL_ID = 1;
 const WALL_W = 800;
 const WALL_H = 500;
 const MODEL_URL = "/models/fasada.glb";
 const STORAGE_OUTPUT = "mapping_output_state_v1";
 const DEFAULT_VIDEO_PATH = "/videos/fasada.mp4";
+
+function safeParse(json, fallback) {
+  try {
+    return json ? JSON.parse(json) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 function normalizeTextureValue(type, value) {
   if (type === "color") return value || "#ffffff";
@@ -54,20 +61,95 @@ function createMeshWarp(w, h, cols = 5, rows = 5) {
   };
 }
 
+function ensureMeshWarp(warp, wallW, wallH, cols = 5, rows = 5) {
+  if (
+    warp?.mode === "mesh" &&
+    Array.isArray(warp?.points) &&
+    Number(warp?.cols) >= 2 &&
+    Number(warp?.rows) >= 2
+  ) {
+    return {
+      ...warp,
+      points: warp.points.map((p) => ({
+        x: Number(p?.x || 0),
+        y: Number(p?.y || 0),
+        pinned: Boolean(p?.pinned)
+      }))
+    };
+  }
+
+  return createMeshWarp(wallW, wallH, cols, rows);
+}
+
+function resolveUpdater(currentValue, nextValueOrFn) {
+  return typeof nextValueOrFn === "function"
+    ? nextValueOrFn(currentValue)
+    : nextValueOrFn;
+}
+
+function getStoredEditorState() {
+  if (typeof window === "undefined") return {};
+  return safeParse(localStorage.getItem(STORAGE_OUTPUT), {});
+}
+
+function offsetPoints(points, dx, dy, wallW, wallH) {
+  return (points || []).map((p) => ({
+    x: Math.max(0, Math.min(wallW, Number(p.x || 0) + dx)),
+    y: Math.max(0, Math.min(wallH, Number(p.y || 0) + dy))
+  }));
+}
+
+function offsetWarp(warp, dx, dy, wallW, wallH, cols = 4, rows = 4) {
+  const mesh = ensureMeshWarp(warp, wallW, wallH, cols, rows);
+
+  return {
+    ...mesh,
+    points: mesh.points.map((p) => ({
+      ...p,
+      x: Math.max(0, Math.min(wallW, Number(p.x || 0) + dx)),
+      y: Math.max(0, Math.min(wallH, Number(p.y || 0) + dy))
+    }))
+  };
+}
+
 export default function ModelPage() {
   const isOutput =
     new URLSearchParams(window.location.search).get("output") === "1";
 
-  const [renderMode, setRenderMode] = useState("plane");
+  const stored = useMemo(() => getStoredEditorState(), []);
+
+  const [renderMode, setRenderMode] = useState(
+    stored?.renderMode === "glb" ? "glb" : "plane"
+  );
+
   const [mode, setMode] = useState("draw");
   const [points, setPoints] = useState([]);
   const [isClosed, setIsClosed] = useState(false);
 
   const [opacity, setOpacity] = useState(0.35);
-  const [showGrid, setShowGrid] = useState(false);
-  const [showPinkBackground, setShowPinkBackground] = useState(true);
+  const [showGrid, setShowGrid] = useState(Boolean(stored?.showGrid));
+  const [showPinkBackground, setShowPinkBackground] = useState(
+    stored?.showPinkBackground !== false
+  );
 
-  const [warp, setWarp] = useState(() => createMeshWarp(WALL_W, WALL_H, 5, 5));
+  const [warp, setWarp] = useState(() =>
+    ensureMeshWarp(stored?.warp, WALL_W, WALL_H, 5, 5)
+  );
+
+  const [maskWarps, setMaskWarps] = useState(() => {
+    const raw = stored?.maskWarps || {};
+    const normalized = {};
+
+    Object.entries(raw).forEach(([key, value]) => {
+      normalized[key] = ensureMeshWarp(value, WALL_W, WALL_H, 4, 4);
+    });
+
+    return normalized;
+  });
+
+  const [draftLocalWarp, setDraftLocalWarp] = useState(() =>
+    ensureMeshWarp(stored?.draftLocalWarp, WALL_W, WALL_H, 4, 4)
+  );
 
   const [projector, setProjector] = useState({
     distance: 2.5,
@@ -100,7 +182,15 @@ export default function ModelPage() {
     (async () => {
       try {
         const data = await getMasks(MODEL_ID);
-        setMasks(Array.isArray(data) ? data : []);
+        const normalizedMasks = Array.isArray(data) ? data : [];
+
+        setMasks(normalizedMasks);
+
+        const nextWarps = {};
+        normalizedMasks.forEach((m) => {
+          nextWarps[m.id] = ensureMeshWarp(m.localWarp, WALL_W, WALL_H, 4, 4);
+        });
+        setMaskWarps(nextWarps);
       } catch (e) {
         console.error(e);
         alert("Nie udało się pobrać masek (sprawdź API / mock).");
@@ -123,13 +213,59 @@ export default function ModelPage() {
     [selectedMaskId, hasPolygon, maskName]
   );
 
+  const canDuplicate = useMemo(
+    () => selectedMaskId !== null && hasPolygon,
+    [selectedMaskId, hasPolygon]
+  );
+
   const normalizedTextureValue = useMemo(
     () => normalizeTextureValue(textureType, textureValue),
     [textureType, textureValue]
   );
 
+  const selectedOrDraftLocalWarp = useMemo(() => {
+    if (selectedMaskId !== null) {
+      return ensureMeshWarp(maskWarps[selectedMaskId], WALL_W, WALL_H, 4, 4);
+    }
+
+    return ensureMeshWarp(draftLocalWarp, WALL_W, WALL_H, 4, 4);
+  }, [selectedMaskId, maskWarps, draftLocalWarp]);
+
+  const setSelectedOrDraftLocalWarp = (nextValueOrFn) => {
+    if (selectedMaskId !== null) {
+      setMaskWarps((prev) => {
+        const current = ensureMeshWarp(prev[selectedMaskId], WALL_W, WALL_H, 4, 4);
+        const next = resolveUpdater(current, nextValueOrFn);
+
+        return {
+          ...prev,
+          [selectedMaskId]: ensureMeshWarp(next, WALL_W, WALL_H, 4, 4)
+        };
+      });
+      return;
+    }
+
+    setDraftLocalWarp((prev) => {
+      const current = ensureMeshWarp(prev, WALL_W, WALL_H, 4, 4);
+      const next = resolveUpdater(current, nextValueOrFn);
+      return ensureMeshWarp(next, WALL_W, WALL_H, 4, 4);
+    });
+  };
+
+  const masksWithLocalWarp = useMemo(
+    () =>
+      masks.map((m) => ({
+        ...m,
+        localWarp: maskWarps[m.id]
+          ? ensureMeshWarp(maskWarps[m.id], WALL_W, WALL_H, 4, 4)
+          : null
+      })),
+    [masks, maskWarps]
+  );
+
   const activeDraft = useMemo(
     () => ({
+      id: selectedMaskId ?? "__draft__",
       name: maskName,
       type: maskType,
       operation,
@@ -141,9 +277,11 @@ export default function ModelPage() {
       textureValue: normalizedTextureValue,
       points,
       opacity,
-      isClosed
+      isClosed,
+      localWarp: selectedOrDraftLocalWarp
     }),
     [
+      selectedMaskId,
       maskName,
       maskType,
       operation,
@@ -155,7 +293,8 @@ export default function ModelPage() {
       normalizedTextureValue,
       points,
       opacity,
-      isClosed
+      isClosed,
+      selectedOrDraftLocalWarp
     ]
   );
 
@@ -174,6 +313,7 @@ export default function ModelPage() {
     setTextureType("color");
     setTextureValue("#ffffff");
     setOpacity(0.35);
+    setDraftLocalWarp(createMeshWarp(WALL_W, WALL_H, 4, 4));
   };
 
   const exportJson = () => {
@@ -195,15 +335,18 @@ export default function ModelPage() {
       points: points.map((p) => ({
         x: Math.round(p.x),
         y: Math.round(p.y)
-      }))
+      })),
+      localWarp: selectedMaskId !== null ? maskWarps[selectedMaskId] || null : draftLocalWarp
     };
 
     console.log("MASK JSON:", payload);
-    alert("JSON maski poszedł do konsoli (F12 → Console).");
+    alert("JSON maski poszedł do konsoli.");
   };
 
   const saveNew = async () => {
     if (!canSaveNew) return;
+
+    const localWarp = ensureMeshWarp(draftLocalWarp, WALL_W, WALL_H, 4, 4);
 
     const payload = {
       name: maskName.trim(),
@@ -219,14 +362,22 @@ export default function ModelPage() {
       points: points.map((p) => ({
         x: Math.round(p.x),
         y: Math.round(p.y)
-      }))
+      })),
+      localWarp
     };
 
     try {
       const created = await createMask(MODEL_ID, payload);
+
       setMasks((prev) =>
         [...prev, created].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
       );
+
+      setMaskWarps((prev) => ({
+        ...prev,
+        [created.id]: ensureMeshWarp(created.localWarp || localWarp, WALL_W, WALL_H, 4, 4)
+      }));
+
       setSelectedMaskId(created.id);
       setMode("edit");
     } catch (e) {
@@ -237,6 +388,14 @@ export default function ModelPage() {
 
   const updateSelected = async () => {
     if (!canUpdate) return;
+
+    const localWarp = ensureMeshWarp(
+      selectedOrDraftLocalWarp,
+      WALL_W,
+      WALL_H,
+      4,
+      4
+    );
 
     const patch = {
       name: maskName.trim(),
@@ -252,16 +411,24 @@ export default function ModelPage() {
       points: points.map((p) => ({
         x: Math.round(p.x),
         y: Math.round(p.y)
-      }))
+      })),
+      localWarp
     };
 
     try {
       const updated = await apiUpdateMask(selectedMaskId, patch);
+
       setMasks((prev) =>
         prev
           .map((m) => (m.id === updated.id ? updated : m))
           .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
       );
+
+      setMaskWarps((prev) => ({
+        ...prev,
+        [updated.id]: ensureMeshWarp(updated.localWarp || localWarp, WALL_W, WALL_H, 4, 4)
+      }));
+
       alert("Zaktualizowano maskę ✅");
     } catch (e) {
       console.error(e);
@@ -269,10 +436,86 @@ export default function ModelPage() {
     }
   };
 
+  const duplicateSelected = async () => {
+    if (!canDuplicate) return;
+
+    const dx = 24;
+    const dy = 18;
+
+    const duplicatedPoints = offsetPoints(points, dx, dy, WALL_W, WALL_H);
+    const duplicatedWarp = offsetWarp(
+      selectedOrDraftLocalWarp,
+      dx,
+      dy,
+      WALL_W,
+      WALL_H,
+      4,
+      4
+    );
+
+    const payload = {
+      name: `${maskName.trim() || "Mask"} copy`,
+      type: maskType,
+      operation,
+      zIndex: Number(zIndex || 0) + 1,
+      visible,
+      locked,
+      layerName,
+      textureType,
+      textureValue: normalizedTextureValue,
+      opacity,
+      points: duplicatedPoints.map((p) => ({
+        x: Math.round(p.x),
+        y: Math.round(p.y)
+      })),
+      localWarp: duplicatedWarp
+    };
+
+    try {
+      const created = await createMask(MODEL_ID, payload);
+
+      setMasks((prev) =>
+        [...prev, created].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+      );
+
+      setMaskWarps((prev) => ({
+        ...prev,
+        [created.id]: ensureMeshWarp(created.localWarp || duplicatedWarp, WALL_W, WALL_H, 4, 4)
+      }));
+
+      setSelectedMaskId(created.id);
+      setMaskName(created.name || payload.name);
+      setMaskType(payload.type);
+      setOperation(payload.operation);
+      setZIndex(payload.zIndex);
+      setVisible(payload.visible);
+      setLocked(payload.locked);
+      setLayerName(payload.layerName);
+      setTextureType(payload.textureType);
+      setTextureValue(payload.textureValue);
+      setPoints(duplicatedPoints);
+      setOpacity(payload.opacity);
+      setIsClosed(true);
+      setMode("edit");
+
+      alert("Utworzono kopię maski ✅");
+    } catch (e) {
+      console.error(e);
+      alert("Nie udało się zduplikować maski.");
+    }
+  };
+
   const deleteMask = async (id) => {
     try {
       await apiDeleteMask(id);
+
       setMasks((prev) => prev.filter((m) => m.id !== id));
+      setMaskWarps((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+
       if (selectedMaskId === id) {
         resetDraft();
       }
@@ -308,6 +551,11 @@ export default function ModelPage() {
     setOpacity(typeof mask.opacity === "number" ? mask.opacity : 0.35);
     setIsClosed(true);
     setMode("edit");
+
+    setMaskWarps((prev) => ({
+      ...prev,
+      [id]: ensureMeshWarp(mask.localWarp || prev[id], WALL_W, WALL_H, 4, 4)
+    }));
   };
 
   const handleContextMenu = (e) => {
@@ -331,11 +579,14 @@ export default function ModelPage() {
           opacity,
           showGrid,
           showPinkBackground,
-          masks,
+          masks: masksWithLocalWarp,
+          maskWarps,
+          draftLocalWarp,
           warp,
           projector,
           renderMode,
           draft: {
+            id: selectedMaskId ?? "__draft__",
             name: maskName,
             type: maskType,
             operation,
@@ -347,7 +598,8 @@ export default function ModelPage() {
             textureValue: normalizedTextureValue,
             points,
             opacity,
-            isClosed
+            isClosed,
+            localWarp: selectedOrDraftLocalWarp
           }
         })
       );
@@ -361,10 +613,13 @@ export default function ModelPage() {
     opacity,
     showGrid,
     showPinkBackground,
-    masks,
+    masksWithLocalWarp,
+    maskWarps,
+    draftLocalWarp,
     warp,
     projector,
     renderMode,
+    selectedMaskId,
     maskName,
     maskType,
     operation,
@@ -373,7 +628,8 @@ export default function ModelPage() {
     locked,
     layerName,
     textureType,
-    normalizedTextureValue
+    normalizedTextureValue,
+    selectedOrDraftLocalWarp
   ]);
 
   if (isOutput) {
@@ -405,7 +661,8 @@ export default function ModelPage() {
         wallW={WALL_W}
         wallH={WALL_H}
         showGrid={showGrid}
-        masks={masks}
+        showPinkBackground={showPinkBackground}
+        masks={masksWithLocalWarp}
         activeDraft={activeDraft}
         imageUrl="/projection.jpg"
         onTexture={setProjectionTexture}
@@ -448,6 +705,17 @@ export default function ModelPage() {
               onReset={resetDraft}
               onExportJson={exportJson}
             />
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8, marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={duplicateSelected}
+                disabled={!canDuplicate}
+                style={canDuplicate ? ui.button : { ...ui.button, opacity: 0.5, cursor: "not-allowed" }}
+              >
+                Duplicate selected mask
+              </button>
+            </div>
           </SidebarPanel>
 
           <SidebarPanel title="Saved masks">
@@ -511,19 +779,34 @@ export default function ModelPage() {
         </div>
 
         <div style={ui.sidebar}>
-          <SidebarPanel title="Projector settings">
-            <ProjectorSettings
-              projector={projector}
-              setProjector={setProjector}
+          <SidebarPanel title="Selected mask / draft warp">
+            <WarpEditor
+              warp={selectedOrDraftLocalWarp}
+              setWarp={setSelectedOrDraftLocalWarp}
+              wallW={WALL_W}
+              wallH={WALL_H}
+              sourcePoints={hasPolygon ? points : []}
+              sourceEnabled={hasPolygon}
+              autoFitLabel="Auto-fit do maski"
             />
           </SidebarPanel>
 
-          <SidebarPanel title="Advanced Warp / Mesh">
+          <SidebarPanel title="Global output warp">
             <WarpEditor
               warp={warp}
               setWarp={setWarp}
               wallW={WALL_W}
               wallH={WALL_H}
+              sourcePoints={[]}
+              sourceEnabled={false}
+              autoFitLabel="Auto-fit"
+            />
+          </SidebarPanel>
+
+          <SidebarPanel title="Projector settings">
+            <ProjectorSettings
+              projector={projector}
+              setProjector={setProjector}
             />
           </SidebarPanel>
         </div>
