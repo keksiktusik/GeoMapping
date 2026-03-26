@@ -651,7 +651,6 @@ function makeProjectorCamera(projector, aspect) {
   cam.rotation.order = "YXZ";
 
   cam.position.set(p.offsetX, p.offsetY, p.distance);
-
   cam.rotation.set(
     degToRad(p.angleX),
     degToRad(p.angleY),
@@ -694,97 +693,6 @@ function PlaneDesiredScene({ projectionTexture }) {
   );
 }
 
-function GlbDesiredScene({ modelUrl, projectionTexture, simplified = false }) {
-  const { scene } = useGLTF(modelUrl || MODEL_URL);
-  const cloned = useMemo(() => scene.clone(), [scene]);
-
-  const fit = useMemo(() => {
-    const box = new THREE.Box3().setFromObject(cloned);
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-
-    box.getSize(size);
-    box.getCenter(center);
-
-    const targetWidth = 8;
-    const targetHeight = 5;
-
-    const sx = targetWidth / (size.x || 1);
-    const sy = targetHeight / (size.y || 1);
-    const scale = Math.min(sx, sy);
-
-    return { center, scale };
-  }, [cloned]);
-
-  const material = useMemo(() => {
-    if (!projectionTexture) return null;
-
-    return new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: !simplified,
-      uniforms: {
-        baseTexture: { value: projectionTexture }
-      },
-      vertexShader: `
-        varying vec3 vWorldPosition;
-
-        void main() {
-          vec4 worldPos = modelMatrix * vec4(position, 1.0);
-          vWorldPosition = worldPos.xyz;
-          gl_Position = projectionMatrix * viewMatrix * worldPos;
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D baseTexture;
-        varying vec3 vWorldPosition;
-
-        void main() {
-          vec2 uv;
-          uv.x = vWorldPosition.x / 8.0 + 0.5;
-          uv.y = vWorldPosition.y / 5.0 + 0.5;
-
-          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-            discard;
-          }
-
-          vec4 color = texture2D(baseTexture, uv);
-          if (color.a < 0.01) {
-            discard;
-          }
-
-          gl_FragColor = color;
-        }
-      `
-    });
-  }, [projectionTexture, simplified]);
-
-  useEffect(() => {
-    if (!material) return;
-
-    cloned.traverse((obj) => {
-      if (obj.isMesh) {
-        obj.material = material;
-        if (simplified) {
-          obj.castShadow = false;
-          obj.receiveShadow = false;
-          obj.frustumCulled = true;
-        }
-      }
-    });
-  }, [cloned, material, simplified]);
-
-  if (!material) return null;
-
-  return (
-    <group scale={[fit.scale, fit.scale, fit.scale]}>
-      <primitive
-        object={cloned}
-        position={[-fit.center.x, -fit.center.y, -fit.center.z]}
-      />
-    </group>
-  );
-}
-
 function DesiredPass({
   desiredScene,
   desiredTarget,
@@ -808,7 +716,7 @@ function DesiredPass({
   );
 }
 
-function useCompensationMaterial(desiredTexture, referenceCamera) {
+function usePlaneCompensationMaterial(desiredTexture, referenceCamera) {
   return useMemo(() => {
     if (!desiredTexture || !referenceCamera) return null;
 
@@ -867,8 +775,52 @@ function useCompensationMaterial(desiredTexture, referenceCamera) {
   }, [desiredTexture, referenceCamera]);
 }
 
+function useGlbCompensationMaterial(desiredTexture, simplified = false) {
+  return useMemo(() => {
+    if (!desiredTexture) return null;
+
+    return new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: !simplified,
+      uniforms: {
+        desiredTexture: { value: desiredTexture }
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+
+        void main() {
+          vec4 worldPos = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPos.xyz;
+          gl_Position = projectionMatrix * viewMatrix * worldPos;
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D desiredTexture;
+        varying vec3 vWorldPosition;
+
+        void main() {
+          vec2 uv;
+          uv.x = vWorldPosition.x / 8.0 + 0.5;
+          uv.y = vWorldPosition.y / 5.0 + 0.5;
+
+          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+            discard;
+          }
+
+          vec4 color = texture2D(desiredTexture, uv);
+          if (color.a < 0.01) {
+            discard;
+          }
+
+          gl_FragColor = color;
+        }
+      `
+    });
+  }, [desiredTexture, simplified]);
+}
+
 function PlaneCompensationScene({ desiredTexture, referenceCamera }) {
-  const material = useCompensationMaterial(desiredTexture, referenceCamera);
+  const material = usePlaneCompensationMaterial(desiredTexture, referenceCamera);
 
   if (!material) return null;
 
@@ -883,7 +835,6 @@ function PlaneCompensationScene({ desiredTexture, referenceCamera }) {
 function GlbCompensationScene({
   modelUrl,
   desiredTexture,
-  referenceCamera,
   simplified = false
 }) {
   const { scene } = useGLTF(modelUrl || MODEL_URL);
@@ -907,7 +858,7 @@ function GlbCompensationScene({
     return { center, scale };
   }, [cloned]);
 
-  const material = useCompensationMaterial(desiredTexture, referenceCamera);
+  const material = useGlbCompensationMaterial(desiredTexture, simplified);
 
   useEffect(() => {
     if (!material) return;
@@ -969,7 +920,6 @@ function CompensationPass({
           modelUrl={modelUrl}
           simplified={simplified}
           desiredTexture={desiredTexture}
-          referenceCamera={referenceCamera}
         />
       ) : (
         <PlaneCompensationScene
@@ -1062,19 +1012,19 @@ function WarpOutputSurface({ texture, warp, wallW, wallH }) {
 
 function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersion }) {
   const compensationRenderMode =
-  state?.outputSurfaceMode === "lightGlb" || state?.outputSurfaceMode === "glb"
-    ? "glb"
-    : "plane";
+    state?.outputSurfaceMode === "lightGlb" || state?.outputSurfaceMode === "glb"
+      ? "glb"
+      : "plane";
 
-const effectiveModelUrl = state?.outputModelUrl || MODEL_URL;
-const isSimplified = state?.outputSurfaceMode === "lightGlb";
+  const effectiveModelUrl = state?.outputModelUrl || MODEL_URL;
+  const isSimplified = state?.outputSurfaceMode === "lightGlb";
 
-const renderScale =
-  compensationRenderMode === "glb"
-    ? isSimplified
-      ? 0.72
-      : 0.6
-    : 1;
+  const renderScale =
+    compensationRenderMode === "glb"
+      ? isSimplified
+        ? 0.75
+        : 0.62
+      : 1;
 
   const renderW = Math.max(2, Math.floor((viewportW || wallW) * renderScale));
   const renderH = Math.max(2, Math.floor((viewportH || wallH) * renderScale));
@@ -1118,27 +1068,19 @@ const renderScale =
   }, [state, wallW, wallH]);
 
   const projectionAsset = useMemo(
-  () =>
-    createProjectionTextureAsset({
-      wallW,
-      wallH,
-      showGrid: false,
-      showPinkBackground: false,
-      masks: state.masks,
-      activeDraft,
-      imageCache,
-      videoCache,
-      onAssetReady: assetVersion.bump
-    }),
-    [
-      wallW,
-      wallH,
-      state.showGrid,
-      state.showPinkBackground,
-      state.masks,
-      activeDraft,
-      assetVersion.value
-    ]
+    () =>
+      createProjectionTextureAsset({
+        wallW,
+        wallH,
+        showGrid: false,
+        showPinkBackground: false,
+        masks: state.masks,
+        activeDraft,
+        imageCache,
+        videoCache,
+        onAssetReady: assetVersion.bump
+      }),
+    [wallW, wallH, state.masks, activeDraft, assetVersion.value]
   );
 
   useEffect(() => {
@@ -1174,24 +1116,24 @@ const renderScale =
     <>
       <ScreenCamera />
 
-     <DesiredPass
-  desiredScene={desiredScene}
-  desiredTarget={desiredTarget}
-  projectionTexture={projectionAsset?.texture || null}
-  aspect={aspect}
-/>
+      <DesiredPass
+        desiredScene={desiredScene}
+        desiredTarget={desiredTarget}
+        projectionTexture={projectionAsset?.texture || null}
+        aspect={aspect}
+      />
 
-<CompensationPass
-  compensationScene={compensationScene}
-  projectorTarget={projectorTarget}
-  desiredTexture={desiredTarget.texture}
-  renderMode={compensationRenderMode}
-  modelUrl={effectiveModelUrl}
-  simplified={isSimplified}
-  projector={state.projector}
-  aspect={aspect}
-  referenceCamera={referenceCamera}
-/>
+      <CompensationPass
+        compensationScene={compensationScene}
+        projectorTarget={projectorTarget}
+        desiredTexture={desiredTarget.texture}
+        renderMode={compensationRenderMode}
+        modelUrl={effectiveModelUrl}
+        simplified={isSimplified}
+        projector={state.projector}
+        aspect={aspect}
+        referenceCamera={referenceCamera}
+      />
 
       <WarpOutputSurface
         texture={projectorTarget.texture}
