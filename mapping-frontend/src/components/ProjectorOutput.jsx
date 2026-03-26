@@ -694,8 +694,8 @@ function PlaneDesiredScene({ projectionTexture }) {
   );
 }
 
-function GlbDesiredScene({ modelUrl, projectionTexture }) {
-  const { scene } = useGLTF(modelUrl);
+function GlbDesiredScene({ modelUrl, projectionTexture, simplified = false }) {
+  const { scene } = useGLTF(modelUrl || MODEL_URL);
   const cloned = useMemo(() => scene.clone(), [scene]);
 
   const fit = useMemo(() => {
@@ -721,6 +721,7 @@ function GlbDesiredScene({ modelUrl, projectionTexture }) {
 
     return new THREE.ShaderMaterial({
       transparent: true,
+      depthWrite: !simplified,
       uniforms: {
         baseTexture: { value: projectionTexture }
       },
@@ -755,7 +756,7 @@ function GlbDesiredScene({ modelUrl, projectionTexture }) {
         }
       `
     });
-  }, [projectionTexture]);
+  }, [projectionTexture, simplified]);
 
   useEffect(() => {
     if (!material) return;
@@ -763,9 +764,14 @@ function GlbDesiredScene({ modelUrl, projectionTexture }) {
     cloned.traverse((obj) => {
       if (obj.isMesh) {
         obj.material = material;
+        if (simplified) {
+          obj.castShadow = false;
+          obj.receiveShadow = false;
+          obj.frustumCulled = true;
+        }
       }
     });
-  }, [cloned, material]);
+  }, [cloned, material, simplified]);
 
   if (!material) return null;
 
@@ -782,7 +788,6 @@ function GlbDesiredScene({ modelUrl, projectionTexture }) {
 function DesiredPass({
   desiredScene,
   desiredTarget,
-  renderMode,
   projectionTexture,
   aspect
 }) {
@@ -798,16 +803,7 @@ function DesiredPass({
   });
 
   return createPortal(
-    <>
-      {renderMode === "glb" ? (
-        <GlbDesiredScene
-          modelUrl={MODEL_URL}
-          projectionTexture={projectionTexture}
-        />
-      ) : (
-        <PlaneDesiredScene projectionTexture={projectionTexture} />
-      )}
-    </>,
+    <PlaneDesiredScene projectionTexture={projectionTexture} />,
     desiredScene
   );
 }
@@ -887,9 +883,10 @@ function PlaneCompensationScene({ desiredTexture, referenceCamera }) {
 function GlbCompensationScene({
   modelUrl,
   desiredTexture,
-  referenceCamera
+  referenceCamera,
+  simplified = false
 }) {
-  const { scene } = useGLTF(modelUrl);
+  const { scene } = useGLTF(modelUrl || MODEL_URL);
   const cloned = useMemo(() => scene.clone(), [scene]);
 
   const fit = useMemo(() => {
@@ -918,9 +915,14 @@ function GlbCompensationScene({
     cloned.traverse((obj) => {
       if (obj.isMesh) {
         obj.material = material;
+        if (simplified) {
+          obj.castShadow = false;
+          obj.receiveShadow = false;
+          obj.frustumCulled = true;
+        }
       }
     });
-  }, [cloned, material]);
+  }, [cloned, material, simplified]);
 
   if (!material) return null;
 
@@ -939,6 +941,8 @@ function CompensationPass({
   projectorTarget,
   desiredTexture,
   renderMode,
+  modelUrl,
+  simplified,
   projector,
   aspect,
   referenceCamera
@@ -962,7 +966,8 @@ function CompensationPass({
     <>
       {renderMode === "glb" ? (
         <GlbCompensationScene
-          modelUrl={MODEL_URL}
+          modelUrl={modelUrl}
+          simplified={simplified}
           desiredTexture={desiredTexture}
           referenceCamera={referenceCamera}
         />
@@ -1056,8 +1061,23 @@ function WarpOutputSurface({ texture, warp, wallW, wallH }) {
 }
 
 function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersion }) {
-  const renderW = Math.max(2, Math.floor(viewportW || wallW));
-  const renderH = Math.max(2, Math.floor(viewportH || wallH));
+  const compensationRenderMode =
+  state?.outputSurfaceMode === "lightGlb" || state?.outputSurfaceMode === "glb"
+    ? "glb"
+    : "plane";
+
+const effectiveModelUrl = state?.outputModelUrl || MODEL_URL;
+const isSimplified = state?.outputSurfaceMode === "lightGlb";
+
+const renderScale =
+  compensationRenderMode === "glb"
+    ? isSimplified
+      ? 0.72
+      : 0.6
+    : 1;
+
+  const renderW = Math.max(2, Math.floor((viewportW || wallW) * renderScale));
+  const renderH = Math.max(2, Math.floor((viewportH || wallH) * renderScale));
 
   const desiredTarget = useFBO(renderW, renderH, {
     minFilter: THREE.LinearFilter,
@@ -1098,18 +1118,18 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
   }, [state, wallW, wallH]);
 
   const projectionAsset = useMemo(
-    () =>
-      createProjectionTextureAsset({
-        wallW,
-        wallH,
-        showGrid: state.showGrid,
-        showPinkBackground: state.showPinkBackground,
-        masks: state.masks,
-        activeDraft,
-        imageCache,
-        videoCache,
-        onAssetReady: assetVersion.bump
-      }),
+  () =>
+    createProjectionTextureAsset({
+      wallW,
+      wallH,
+      showGrid: false,
+      showPinkBackground: false,
+      masks: state.masks,
+      activeDraft,
+      imageCache,
+      videoCache,
+      onAssetReady: assetVersion.bump
+    }),
     [
       wallW,
       wallH,
@@ -1148,40 +1168,30 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
   });
 
   const aspect = renderW / renderH;
-  const effectiveRenderMode =
-    state?.outputSurfaceMode === "lightGlb" || state?.outputSurfaceMode === "glb"
-      ? "glb"
-      : state?.outputSurfaceMode === "plane"
-        ? "plane"
-        : state.renderMode;
-
-  const effectiveModelUrl = state?.outputModelUrl || MODEL_URL;
-
   const referenceCamera = useMemo(() => makeReferenceCamera(aspect), [aspect]);
 
   return (
     <>
       <ScreenCamera />
 
-      <DesiredPass
-        desiredScene={desiredScene}
-        desiredTarget={desiredTarget}
-        renderMode={effectiveRenderMode}
-        modelUrl={effectiveModelUrl}
-        projectionTexture={projectionAsset?.texture || null}
-        aspect={aspect}
-      />
+     <DesiredPass
+  desiredScene={desiredScene}
+  desiredTarget={desiredTarget}
+  projectionTexture={projectionAsset?.texture || null}
+  aspect={aspect}
+/>
 
-      <CompensationPass
-        compensationScene={compensationScene}
-        projectorTarget={projectorTarget}
-        desiredTexture={desiredTarget.texture}
-        renderMode={effectiveRenderMode}
-        modelUrl={effectiveModelUrl}
-        projector={state.projector}
-        aspect={aspect}
-        referenceCamera={referenceCamera}
-      />
+<CompensationPass
+  compensationScene={compensationScene}
+  projectorTarget={projectorTarget}
+  desiredTexture={desiredTarget.texture}
+  renderMode={compensationRenderMode}
+  modelUrl={effectiveModelUrl}
+  simplified={isSimplified}
+  projector={state.projector}
+  aspect={aspect}
+  referenceCamera={referenceCamera}
+/>
 
       <WarpOutputSurface
         texture={projectorTarget.texture}
@@ -1194,13 +1204,6 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
 }
 
 function normalizeParsedState(parsed, wallW, wallH) {
-  const outputSurfaceMode =
-    parsed?.outputSurfaceMode === "plane" ||
-    parsed?.outputSurfaceMode === "glb" ||
-    parsed?.outputSurfaceMode === "lightGlb"
-      ? parsed.outputSurfaceMode
-      : undefined;
-
   return {
     ...parsed,
     masks: Array.isArray(parsed?.masks) ? parsed.masks : [],
@@ -1216,7 +1219,12 @@ function normalizeParsedState(parsed, wallW, wallH) {
       parsed?.draftLocalWarp || createMeshWarp(wallW, wallH, 4, 4),
     warp: ensureMeshWarp(parsed?.warp, wallW, wallH, 5, 5),
     projector: getSafeProjector(parsed?.projector || {}),
-    outputSurfaceMode,
+    outputSurfaceMode:
+      parsed?.outputSurfaceMode === "plane" ||
+      parsed?.outputSurfaceMode === "glb" ||
+      parsed?.outputSurfaceMode === "lightGlb"
+        ? parsed.outputSurfaceMode
+        : undefined,
     outputModelUrl: parsed?.outputModelUrl || MODEL_URL
   };
 }
@@ -1323,7 +1331,7 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
     >
       <Canvas
         key={canvasKey}
-        dpr={[1, 1.5]}
+        dpr={1}
         frameloop="always"
         resize={{ scroll: false, debounce: { resize: 0, scroll: 0 } }}
         gl={{

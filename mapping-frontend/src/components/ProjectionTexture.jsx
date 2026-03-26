@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 function createBuffer(w, h) {
@@ -23,7 +23,7 @@ function drawPolygonPath(ctx, pts) {
 
 function drawGrid(ctx, wallW, wallH) {
   ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.lineWidth = 1;
   const step = 40;
 
@@ -42,6 +42,18 @@ function drawGrid(ctx, wallW, wallH) {
   }
 
   ctx.restore();
+}
+
+function safePlay(video) {
+  if (!video) return;
+  video.muted = true;
+  video.autoplay = true;
+  video.playsInline = true;
+
+  const p = video.play();
+  if (p && typeof p.catch === "function") {
+    p.catch(() => {});
+  }
 }
 
 function getLoadedImage(src, imageCache) {
@@ -88,9 +100,15 @@ function getLoadedVideo(src, videoCache) {
   if (!src) return null;
   const cached = videoCache.current.get(src);
   if (!cached) return null;
-  if (cached.status === "loaded" || cached.status === "playing") {
+
+  if (
+    (cached.status === "loaded" || cached.status === "playing") &&
+    cached.video
+  ) {
+    safePlay(cached.video);
     return cached.video;
   }
+
   return null;
 }
 
@@ -99,7 +117,11 @@ function loadVideo(src, videoCache, onReady) {
 
   const cached = videoCache.current.get(src);
   if (cached) {
-    if (cached.status === "loaded" || cached.status === "playing") {
+    if (
+      (cached.status === "loaded" || cached.status === "playing") &&
+      cached.video
+    ) {
+      safePlay(cached.video);
       return cached.video;
     }
     return null;
@@ -110,6 +132,7 @@ function loadVideo(src, videoCache, onReady) {
   video.crossOrigin = "anonymous";
   video.loop = true;
   video.muted = true;
+  video.autoplay = true;
   video.playsInline = true;
   video.preload = "auto";
 
@@ -121,24 +144,31 @@ function loadVideo(src, videoCache, onReady) {
   videoCache.current.set(src, entry);
 
   const markReady = () => {
-    entry.status = "loaded";
+    if (entry.status !== "playing") {
+      entry.status = "loaded";
+    }
+    safePlay(video);
+    onReady?.();
+  };
+
+  const markPlaying = () => {
+    entry.status = "playing";
+    onReady?.();
+  };
+
+  const markError = () => {
+    entry.status = "error";
     onReady?.();
   };
 
   video.addEventListener("loadeddata", markReady);
   video.addEventListener("canplay", markReady);
+  video.addEventListener("play", markPlaying);
+  video.addEventListener("error", markError);
 
-  video.addEventListener("play", () => {
-    entry.status = "playing";
-    onReady?.();
-  });
+  video.load();
+  safePlay(video);
 
-  video.addEventListener("error", () => {
-    entry.status = "error";
-    onReady?.();
-  });
-
-  video.play().catch(() => {});
   return null;
 }
 
@@ -321,7 +351,7 @@ function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) 
     if (loadedImg) {
       ctx.drawImage(loadedImg, 0, 0, wallW, wallH);
     } else {
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = "#f0f0f0";
       ctx.fill();
     }
 
@@ -342,9 +372,10 @@ function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) 
     ctx.clip();
 
     if (loadedVideo && loadedVideo.readyState >= 2) {
+      safePlay(loadedVideo);
       ctx.drawImage(loadedVideo, 0, 0, wallW, wallH);
     } else {
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.fill();
     }
 
@@ -487,7 +518,7 @@ function createProjectionTextureAsset({
     ctx.clearRect(0, 0, wallW, wallH);
 
     if (showPinkBackground) {
-      ctx.fillStyle = "#ff4fbf";
+      ctx.fillStyle = "#1a1f2e";
       ctx.fillRect(0, 0, wallW, wallH);
     }
 
@@ -539,7 +570,7 @@ export default function ProjectionTexture({
 }) {
   const imageCache = useRef(new Map());
   const videoCache = useRef(new Map());
-  const forceVersion = useRef(0);
+  const [forceVersion, setForceVersion] = useState(0);
 
   const asset = useMemo(
     () =>
@@ -553,10 +584,18 @@ export default function ProjectionTexture({
         imageCache,
         videoCache,
         onAssetReady: () => {
-          forceVersion.current += 1;
+          setForceVersion((v) => v + 1);
         }
       }),
-    [wallW, wallH, showGrid, showPinkBackground, masks, activeDraft]
+    [
+      wallW,
+      wallH,
+      showGrid,
+      showPinkBackground,
+      masks,
+      activeDraft,
+      forceVersion
+    ]
   );
 
   useEffect(() => {
@@ -567,6 +606,12 @@ export default function ProjectionTexture({
     let raf = 0;
 
     const loop = () => {
+      videoCache.current.forEach((entry) => {
+        if (entry?.video) {
+          safePlay(entry.video);
+        }
+      });
+
       asset.redraw();
       asset.texture.needsUpdate = true;
       raf = requestAnimationFrame(loop);
@@ -580,6 +625,34 @@ export default function ProjectionTexture({
       onTexture?.(null);
     };
   }, [asset, onTexture]);
+
+  useEffect(() => {
+    const reviveVideos = () => {
+      videoCache.current.forEach((entry) => {
+        if (entry?.video) {
+          safePlay(entry.video);
+        }
+      });
+    };
+
+    const handleVisibility = () => {
+      reviveVideos();
+    };
+
+    const handleFocus = () => {
+      reviveVideos();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handleFocus);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handleFocus);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {

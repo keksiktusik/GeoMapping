@@ -122,6 +122,18 @@ export default function ModelPage() {
     stored?.renderMode === "glb" ? "glb" : "plane"
   );
 
+  const [outputSurfaceMode, setOutputSurfaceMode] = useState(() => {
+    const mode = stored?.outputSurfaceMode;
+    if (mode === "glb" || mode === "lightGlb" || mode === "plane") {
+      return mode;
+    }
+    return "lightGlb";
+  });
+
+  const [outputModelUrl, setOutputModelUrl] = useState(
+    stored?.outputModelUrl || MODEL_URL
+  );
+
   const [mode, setMode] = useState("draw");
   const [points, setPoints] = useState([]);
   const [isClosed, setIsClosed] = useState(false);
@@ -585,6 +597,8 @@ export default function ModelPage() {
           warp,
           projector,
           renderMode,
+          outputSurfaceMode,
+          outputModelUrl,
           draft: {
             id: selectedMaskId ?? "__draft__",
             name: maskName,
@@ -619,6 +633,8 @@ export default function ModelPage() {
     warp,
     projector,
     renderMode,
+    outputSurfaceMode,
+    outputModelUrl,
     selectedMaskId,
     maskName,
     maskType,
@@ -706,12 +722,23 @@ export default function ModelPage() {
               onExportJson={exportJson}
             />
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8, marginTop: 12 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr",
+                gap: 8,
+                marginTop: 12
+              }}
+            >
               <button
                 type="button"
                 onClick={duplicateSelected}
                 disabled={!canDuplicate}
-                style={canDuplicate ? ui.button : { ...ui.button, opacity: 0.5, cursor: "not-allowed" }}
+                style={
+                  canDuplicate
+                    ? ui.button
+                    : { ...ui.button, opacity: 0.5, cursor: "not-allowed" }
+                }
               >
                 Duplicate selected mask
               </button>
@@ -779,6 +806,64 @@ export default function ModelPage() {
         </div>
 
         <div style={ui.sidebar}>
+          <SidebarPanel title="Output surface">
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                To steruje tylko Open Output. Lewy preview zostaje osobno.
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  style={
+                    outputSurfaceMode === "plane"
+                      ? ui.buttonPrimary
+                      : ui.button
+                  }
+                  onClick={() => setOutputSurfaceMode("plane")}
+                >
+                  Plane
+                </button>
+
+                <button
+                  type="button"
+                  style={
+                    outputSurfaceMode === "lightGlb"
+                      ? ui.buttonPrimary
+                      : ui.button
+                  }
+                  onClick={() => setOutputSurfaceMode("lightGlb")}
+                >
+                  Light GLB
+                </button>
+
+                <button
+                  type="button"
+                  style={
+                    outputSurfaceMode === "glb"
+                      ? ui.buttonPrimary
+                      : ui.button
+                  }
+                  onClick={() => setOutputSurfaceMode("glb")}
+                >
+                  Full GLB
+                </button>
+              </div>
+
+              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                Aktualny model outputu:
+              </div>
+
+              <input
+                type="text"
+                value={outputModelUrl}
+                onChange={(e) => setOutputModelUrl(e.target.value)}
+                style={ui.input}
+                placeholder="/models/fasada.glb"
+              />
+            </div>
+          </SidebarPanel>
+
           <SidebarPanel title="Selected mask / draft warp">
             <WarpEditor
               warp={selectedOrDraftLocalWarp}
