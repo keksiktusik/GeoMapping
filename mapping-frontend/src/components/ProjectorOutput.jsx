@@ -84,6 +84,8 @@ function getDefaultState() {
     draftLocalWarp: createMeshWarp(800, 500, 4, 4),
     warp: createMeshWarp(800, 500, 5, 5),
     renderMode: "plane",
+    outputSurfaceMode: "lightGlb",
+    outputModelUrl: MODEL_URL,
     projector: {
       distance: 5,
       offsetX: 0,
@@ -142,7 +144,7 @@ function drawPolygonPath(ctx, pts) {
 
 function drawGrid(ctx, wallW, wallH) {
   ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.lineWidth = 1;
   const step = 40;
 
@@ -207,9 +209,17 @@ function getLoadedVideo(src, videoCache) {
   if (!src) return null;
   const cached = videoCache.current.get(src);
   if (!cached) return null;
-  if (cached.status === "loaded" || cached.status === "playing") {
+
+  if (
+    (cached.status === "loaded" || cached.status === "playing") &&
+    cached.video
+  ) {
+    if (cached.video.paused) {
+      cached.video.play().catch(() => {});
+    }
     return cached.video;
   }
+
   return null;
 }
 
@@ -218,7 +228,13 @@ function loadVideo(src, videoCache, onReady) {
 
   const cached = videoCache.current.get(src);
   if (cached) {
-    if (cached.status === "loaded" || cached.status === "playing") {
+    if (
+      (cached.status === "loaded" || cached.status === "playing") &&
+      cached.video
+    ) {
+      if (cached.video.paused) {
+        cached.video.play().catch(() => {});
+      }
       return cached.video;
     }
     return null;
@@ -229,6 +245,7 @@ function loadVideo(src, videoCache, onReady) {
   video.crossOrigin = "anonymous";
   video.loop = true;
   video.muted = true;
+  video.autoplay = true;
   video.playsInline = true;
   video.preload = "auto";
 
@@ -240,24 +257,30 @@ function loadVideo(src, videoCache, onReady) {
   videoCache.current.set(src, entry);
 
   const markReady = () => {
-    entry.status = "loaded";
+    if (entry.status !== "playing") {
+      entry.status = "loaded";
+    }
+    onReady?.();
+  };
+
+  const markPlaying = () => {
+    entry.status = "playing";
+    onReady?.();
+  };
+
+  const markError = () => {
+    entry.status = "error";
     onReady?.();
   };
 
   video.addEventListener("loadeddata", markReady);
   video.addEventListener("canplay", markReady);
+  video.addEventListener("play", markPlaying);
+  video.addEventListener("error", markError);
 
-  video.addEventListener("play", () => {
-    entry.status = "playing";
-    onReady?.();
-  });
-
-  video.addEventListener("error", () => {
-    entry.status = "error";
-    onReady?.();
-  });
-
+  video.load();
   video.play().catch(() => {});
+
   return null;
 }
 
@@ -405,7 +428,7 @@ function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) 
     if (loadedImg) {
       ctx.drawImage(loadedImg, 0, 0, wallW, wallH);
     } else {
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = "#f0f0f0";
       ctx.fill();
     }
 
@@ -428,7 +451,7 @@ function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) 
     if (loadedVideo && loadedVideo.readyState >= 2) {
       ctx.drawImage(loadedVideo, 0, 0, wallW, wallH);
     } else {
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.fill();
     }
 
@@ -571,7 +594,7 @@ function createProjectionTextureAsset({
     ctx.clearRect(0, 0, wallW, wallH);
 
     if (showPinkBackground) {
-      ctx.fillStyle = "#ff4fbf";
+      ctx.fillStyle = "#1a1f2e";
       ctx.fillRect(0, 0, wallW, wallH);
     }
 
@@ -768,7 +791,7 @@ function DesiredPass({
 
   useFrame(() => {
     gl.setRenderTarget(desiredTarget);
-    gl.setClearColor("black", 1);
+    gl.setClearColor("#000000", 0);
     gl.clear(true, true, true);
     gl.render(desiredScene, referenceCamera);
     gl.setRenderTarget(null);
@@ -776,7 +799,6 @@ function DesiredPass({
 
   return createPortal(
     <>
-      <color attach="background" args={["black"]} />
       {renderMode === "glb" ? (
         <GlbDesiredScene
           modelUrl={MODEL_URL}
@@ -790,7 +812,7 @@ function DesiredPass({
   );
 }
 
-function useCompensationMaterial(desiredTexture, referenceCamera, aspect) {
+function useCompensationMaterial(desiredTexture, referenceCamera) {
   return useMemo(() => {
     if (!desiredTexture || !referenceCamera) return null;
 
@@ -832,7 +854,10 @@ function useCompensationMaterial(desiredTexture, referenceCamera, aspect) {
           vec3 ndc = refClip.xyz / refClip.w;
           vec2 uv = ndc.xy * 0.5 + 0.5;
           uv.y = 1.0 - uv.y;
-          uv = clamp(uv, 0.0, 1.0);
+
+          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+            discard;
+          }
 
           vec4 color = texture2D(desiredTexture, uv);
           if (color.a < 0.01) {
@@ -843,15 +868,11 @@ function useCompensationMaterial(desiredTexture, referenceCamera, aspect) {
         }
       `
     });
-  }, [desiredTexture, referenceCamera, aspect]);
+  }, [desiredTexture, referenceCamera]);
 }
 
-function PlaneCompensationScene({ desiredTexture, referenceCamera, aspect }) {
-  const material = useCompensationMaterial(
-    desiredTexture,
-    referenceCamera,
-    aspect
-  );
+function PlaneCompensationScene({ desiredTexture, referenceCamera }) {
+  const material = useCompensationMaterial(desiredTexture, referenceCamera);
 
   if (!material) return null;
 
@@ -866,8 +887,7 @@ function PlaneCompensationScene({ desiredTexture, referenceCamera, aspect }) {
 function GlbCompensationScene({
   modelUrl,
   desiredTexture,
-  referenceCamera,
-  aspect
+  referenceCamera
 }) {
   const { scene } = useGLTF(modelUrl);
   const cloned = useMemo(() => scene.clone(), [scene]);
@@ -890,11 +910,7 @@ function GlbCompensationScene({
     return { center, scale };
   }, [cloned]);
 
-  const material = useCompensationMaterial(
-    desiredTexture,
-    referenceCamera,
-    aspect
-  );
+  const material = useCompensationMaterial(desiredTexture, referenceCamera);
 
   useEffect(() => {
     if (!material) return;
@@ -936,7 +952,7 @@ function CompensationPass({
 
   useFrame(() => {
     gl.setRenderTarget(projectorTarget);
-    gl.setClearColor("black", 1);
+    gl.setClearColor("#000000", 0);
     gl.clear(true, true, true);
     gl.render(compensationScene, projectorCamera);
     gl.setRenderTarget(null);
@@ -944,19 +960,16 @@ function CompensationPass({
 
   return createPortal(
     <>
-      <color attach="background" args={["black"]} />
       {renderMode === "glb" ? (
         <GlbCompensationScene
           modelUrl={MODEL_URL}
           desiredTexture={desiredTexture}
           referenceCamera={referenceCamera}
-          aspect={aspect}
         />
       ) : (
         <PlaneCompensationScene
           desiredTexture={desiredTexture}
           referenceCamera={referenceCamera}
-          aspect={aspect}
         />
       )}
     </>,
@@ -1031,7 +1044,13 @@ function WarpOutputSurface({ texture, warp, wallW, wallH }) {
 
   return (
     <mesh geometry={geometry}>
-      <meshBasicMaterial map={texture} transparent toneMapped={false} />
+      <meshBasicMaterial
+        map={texture}
+        transparent
+        toneMapped={false}
+        opacity={1}
+        side={THREE.DoubleSide}
+      />
     </mesh>
   );
 }
@@ -1044,14 +1063,16 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
-    stencilBuffer: false
+    stencilBuffer: false,
+    depthBuffer: true
   });
 
   const projectorTarget = useFBO(renderW, renderH, {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     format: THREE.RGBAFormat,
-    stencilBuffer: false
+    stencilBuffer: false,
+    depthBuffer: true
   });
 
   const desiredScene = useMemo(() => new THREE.Scene(), []);
@@ -1127,6 +1148,15 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
   });
 
   const aspect = renderW / renderH;
+  const effectiveRenderMode =
+    state?.outputSurfaceMode === "lightGlb" || state?.outputSurfaceMode === "glb"
+      ? "glb"
+      : state?.outputSurfaceMode === "plane"
+        ? "plane"
+        : state.renderMode;
+
+  const effectiveModelUrl = state?.outputModelUrl || MODEL_URL;
+
   const referenceCamera = useMemo(() => makeReferenceCamera(aspect), [aspect]);
 
   return (
@@ -1136,7 +1166,8 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
       <DesiredPass
         desiredScene={desiredScene}
         desiredTarget={desiredTarget}
-        renderMode={state.renderMode}
+        renderMode={effectiveRenderMode}
+        modelUrl={effectiveModelUrl}
         projectionTexture={projectionAsset?.texture || null}
         aspect={aspect}
       />
@@ -1145,7 +1176,8 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
         compensationScene={compensationScene}
         projectorTarget={projectorTarget}
         desiredTexture={desiredTarget.texture}
-        renderMode={state.renderMode}
+        renderMode={effectiveRenderMode}
+        modelUrl={effectiveModelUrl}
         projector={state.projector}
         aspect={aspect}
         referenceCamera={referenceCamera}
@@ -1161,31 +1193,50 @@ function OutputPipeline({ state, wallW, wallH, viewportW, viewportH, assetVersio
   );
 }
 
-export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
-  const [state, setState] = useState(() => {
-    const parsed = safeParse(localStorage.getItem(STORAGE_KEY), getDefaultState());
+function normalizeParsedState(parsed, wallW, wallH) {
+  const outputSurfaceMode =
+    parsed?.outputSurfaceMode === "plane" ||
+    parsed?.outputSurfaceMode === "glb" ||
+    parsed?.outputSurfaceMode === "lightGlb"
+      ? parsed.outputSurfaceMode
+      : undefined;
 
-    return {
-      ...parsed,
-      masks: Array.isArray(parsed?.masks) ? parsed.masks : [],
-      draft:
-        parsed?.draft
-          ? {
-              ...parsed.draft,
-              localWarp: parsed?.draft?.localWarp || createMeshWarp(wallW, wallH, 4, 4)
-            }
-          : getDefaultState().draft,
-      draftLocalWarp:
-        parsed?.draftLocalWarp || createMeshWarp(wallW, wallH, 4, 4),
-      warp: ensureMeshWarp(parsed?.warp, wallW, wallH, 5, 5),
-      projector: getSafeProjector(parsed?.projector || {})
-    };
+  return {
+    ...parsed,
+    masks: Array.isArray(parsed?.masks) ? parsed.masks : [],
+    draft:
+      parsed?.draft
+        ? {
+            ...parsed.draft,
+            localWarp:
+              parsed?.draft?.localWarp || createMeshWarp(wallW, wallH, 4, 4)
+          }
+        : getDefaultState().draft,
+    draftLocalWarp:
+      parsed?.draftLocalWarp || createMeshWarp(wallW, wallH, 4, 4),
+    warp: ensureMeshWarp(parsed?.warp, wallW, wallH, 5, 5),
+    projector: getSafeProjector(parsed?.projector || {}),
+    outputSurfaceMode,
+    outputModelUrl: parsed?.outputModelUrl || MODEL_URL
+  };
+}
+
+export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
+  const initialRaw =
+    typeof window !== "undefined"
+      ? localStorage.getItem(STORAGE_KEY)
+      : null;
+
+  const [state, setState] = useState(() => {
+    const parsed = safeParse(initialRaw, getDefaultState());
+    return normalizeParsedState(parsed, wallW, wallH);
   });
 
   const rootRef = React.useRef(null);
   const [viewport, setViewport] = useState({ width: wallW, height: wallH });
   const [canvasKey, setCanvasKey] = useState(0);
   const [assetVersionValue, setAssetVersionValue] = useState(0);
+  const lastRawRef = useRef(initialRaw);
 
   const assetVersion = useMemo(
     () => ({
@@ -1197,33 +1248,22 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
 
   useEffect(() => {
     const sync = () => {
-      const nextState = safeParse(
-        localStorage.getItem(STORAGE_KEY),
-        getDefaultState()
-      );
+      const raw = localStorage.getItem(STORAGE_KEY);
 
-      setState({
-        ...nextState,
-        masks: Array.isArray(nextState?.masks) ? nextState.masks : [],
-        draft:
-          nextState?.draft
-            ? {
-                ...nextState.draft,
-                localWarp:
-                  nextState?.draft?.localWarp || createMeshWarp(wallW, wallH, 4, 4)
-              }
-            : getDefaultState().draft,
-        draftLocalWarp:
-          nextState?.draftLocalWarp || createMeshWarp(wallW, wallH, 4, 4),
-        warp: ensureMeshWarp(nextState?.warp, wallW, wallH, 5, 5),
-        projector: getSafeProjector(nextState?.projector || {})
-      });
+      if (raw === lastRawRef.current) {
+        return;
+      }
+
+      lastRawRef.current = raw;
+
+      const nextState = safeParse(raw, getDefaultState());
+      setState(normalizeParsedState(nextState, wallW, wallH));
     };
 
     sync();
 
     window.addEventListener("storage", sync);
-    const interval = setInterval(sync, 200);
+    const interval = setInterval(sync, 250);
 
     return () => {
       window.removeEventListener("storage", sync);
@@ -1276,7 +1316,8 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
         height: "100%",
         minWidth: "100vw",
         minHeight: "100vh",
-        background: "black",
+        background:
+          "radial-gradient(circle at center, #0a0f1f 0%, #000000 100%)",
         overflow: "hidden"
       }}
     >
@@ -1287,17 +1328,17 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
         resize={{ scroll: false, debounce: { resize: 0, scroll: 0 } }}
         gl={{
           antialias: true,
-          alpha: false,
+          alpha: true,
           powerPreference: "high-performance"
         }}
         onCreated={({ gl }) => {
-          gl.setClearColor("#000000", 1);
+          gl.setClearColor("#000000", 0);
         }}
         style={{
           width: "100%",
           height: "100%",
           display: "block",
-          background: "black"
+          background: "transparent"
         }}
       >
         <OutputPipeline
