@@ -4,10 +4,44 @@ const DEFAULT_IMAGE_PATH = "/textures/window.jpg";
 const DEFAULT_VIDEO_PATH = "/videos/fasada.mp4";
 
 function getDefaultTextureValue(type, currentValue = "") {
-  if (type === "color") return currentValue?.startsWith("#") ? currentValue : "#ffffff";
+  if (type === "color") {
+    return currentValue?.startsWith("#") ? currentValue : "#ffffff";
+  }
   if (type === "image") return currentValue || DEFAULT_IMAGE_PATH;
   if (type === "video") return currentValue || DEFAULT_VIDEO_PATH;
   return currentValue || "";
+}
+
+function parseLayerMeta(layerName = "") {
+  const text = String(layerName || "");
+  const blendMatch = text.match(/\[blend:([a-z-]+)\]/i);
+  const featherMatch = text.match(/\[feather:(\d+)\]/i);
+
+  return {
+    baseName: text
+      .replace(/\[blend:[^\]]+\]/gi, "")
+      .replace(/\[feather:[^\]]+\]/gi, "")
+      .trim(),
+    blend: (blendMatch?.[1] || "source-over").toLowerCase(),
+    feather: Math.max(0, Number(featherMatch?.[1] || 0))
+  };
+}
+
+function buildLayerName(baseName, blend, feather) {
+  const parts = [];
+  const trimmedBase = String(baseName || "").trim();
+
+  if (trimmedBase) parts.push(trimmedBase);
+
+  if (blend && blend !== "source-over") {
+    parts.push(`[blend:${blend}]`);
+  }
+
+  if (Number(feather || 0) > 0) {
+    parts.push(`[feather:${Math.max(0, Number(feather || 0))}]`);
+  }
+
+  return parts.join(" ").trim() || "default";
 }
 
 export default function Toolbar({
@@ -44,6 +78,21 @@ export default function Toolbar({
   onReset,
   onExportJson
 }) {
+  const meta = parseLayerMeta(layerName);
+  const baseLayerName = meta.baseName || "default";
+  const blend = meta.blend || "source-over";
+  const feather = meta.feather || 0;
+
+  const setLayerMeta = (next) => {
+    setLayerName(
+      buildLayerName(
+        next.baseName ?? baseLayerName,
+        next.blend ?? blend,
+        next.feather ?? feather
+      )
+    );
+  };
+
   const handleTextureTypeChange = (e) => {
     const nextType = e.target.value;
     setTextureType(nextType);
@@ -82,25 +131,60 @@ export default function Toolbar({
       </div>
 
       <div>
-        <div style={ui.label}>Operation</div>
+        <div style={ui.label}>Warstwa / operacja</div>
         <select
           style={ui.input}
           value={operation}
           onChange={(e) => setOperation(e.target.value)}
         >
-          <option value="add">add</option>
-          <option value="subtract">subtract</option>
-          <option value="intersect">intersect</option>
+          <option value="add">Normal</option>
+          <option value="subtract">Cutout / wytnij</option>
+          <option value="intersect">Mask / zostaw część wspólną</option>
         </select>
       </div>
 
       <div>
-        <div style={ui.label}>Layer name</div>
+        <div style={ui.label}>Nazwa warstwy</div>
         <input
           style={ui.input}
-          value={layerName}
-          onChange={(e) => setLayerName(e.target.value)}
+          value={baseLayerName}
+          onChange={(e) => setLayerMeta({ baseName: e.target.value })}
           placeholder="np. facade-base"
+        />
+      </div>
+
+      <div>
+        <div style={ui.label}>Blend mode</div>
+        <select
+          style={ui.input}
+          value={blend}
+          onChange={(e) => setLayerMeta({ blend: e.target.value })}
+        >
+          <option value="source-over">Normal</option>
+          <option value="multiply">Multiply</option>
+          <option value="screen">Screen</option>
+          <option value="overlay">Overlay</option>
+          <option value="lighten">Lighten</option>
+          <option value="darken">Darken</option>
+          <option value="hard-light">Hard light</option>
+          <option value="soft-light">Soft light</option>
+          <option value="difference">Difference</option>
+          <option value="exclusion">Exclusion</option>
+        </select>
+      </div>
+
+      <div>
+        <div style={ui.label}>Feather krawędzi: {feather}px</div>
+        <input
+          style={{ width: "100%" }}
+          type="range"
+          min="0"
+          max="20"
+          step="1"
+          value={feather}
+          onChange={(e) =>
+            setLayerMeta({ feather: Number(e.target.value || 0) })
+          }
         />
       </div>
 
@@ -149,7 +233,7 @@ export default function Toolbar({
               }
             />
 
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
                 style={ui.button}
                 type="button"
@@ -158,31 +242,18 @@ export default function Toolbar({
                 Ustaw domyślną ścieżkę
               </button>
 
-              {textureType === "image" && (
-                <div
-                  style={{
-                    fontSize: 12,
-                    opacity: 0.8,
-                    display: "flex",
-                    alignItems: "center"
-                  }}
-                >
-                  np. {DEFAULT_IMAGE_PATH}
-                </div>
-              )}
-
-              {textureType === "video" && (
-                <div
-                  style={{
-                    fontSize: 12,
-                    opacity: 0.8,
-                    display: "flex",
-                    alignItems: "center"
-                  }}
-                >
-                  np. {DEFAULT_VIDEO_PATH}
-                </div>
-              )}
+              <div
+                style={{
+                  fontSize: 12,
+                  opacity: 0.8,
+                  display: "flex",
+                  alignItems: "center"
+                }}
+              >
+                {textureType === "image"
+                  ? `np. ${DEFAULT_IMAGE_PATH}`
+                  : `np. ${DEFAULT_VIDEO_PATH}`}
+              </div>
             </div>
           </div>
         )}

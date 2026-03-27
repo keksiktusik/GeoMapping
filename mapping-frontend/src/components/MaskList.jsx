@@ -1,5 +1,26 @@
 import { ui } from "../styles/ui";
 
+function parseLayerMeta(layerName = "") {
+  const text = String(layerName || "");
+  const blendMatch = text.match(/\[blend:([a-z-]+)\]/i);
+  const featherMatch = text.match(/\[feather:(\d+)\]/i);
+
+  return {
+    baseName: text
+      .replace(/\[blend:[^\]]+\]/gi, "")
+      .replace(/\[feather:[^\]]+\]/gi, "")
+      .trim(),
+    blend: (blendMatch?.[1] || "source-over").toLowerCase(),
+    feather: Math.max(0, Number(featherMatch?.[1] || 0))
+  };
+}
+
+function materialLabel(type) {
+  if (type === "video") return "video";
+  if (type === "image") return "image";
+  return "color";
+}
+
 export default function MaskList({
   masks,
   selectedMaskId,
@@ -14,6 +35,7 @@ export default function MaskList({
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {masks.map((m) => {
         const active = m.id === selectedMaskId;
+        const meta = parseLayerMeta(m.layerName);
 
         return (
           <div
@@ -39,17 +61,21 @@ export default function MaskList({
                 <div style={{ fontWeight: 800 }}>{m.name}</div>
 
                 <div style={ui.small}>
-                  type: {m.type} • op: {m.operation || "add"} • z: {m.zIndex ?? 0}
+                  type: {m.type} • mat: {materialLabel(m.textureType)} • op:{" "}
+                  {m.operation || "add"} • z: {m.zIndex ?? 0}
                 </div>
 
                 <div style={ui.small}>
-                  layer: {m.layerName || "default"} • points: {m.points?.length || 0}
+                  layer: {meta.baseName || "default"} • blend:{" "}
+                  {meta.blend === "source-over" ? "normal" : meta.blend} • feather:{" "}
+                  {meta.feather}px
                 </div>
 
                 <div style={ui.small}>
-                  opacity:{" "}
-                  {typeof m.opacity === "number" ? m.opacity.toFixed(2) : "1.00"} • visible:{" "}
-                  {m.visible === false ? "no" : "yes"} • locked: {m.locked ? "yes" : "no"}
+                  points: {m.points?.length || 0} • opacity:{" "}
+                  {typeof m.opacity === "number" ? m.opacity.toFixed(2) : "1.00"} •
+                  visible: {m.visible === false ? " no" : " yes"} • locked:{" "}
+                  {m.locked ? "yes" : "no"}
                 </div>
               </div>
 

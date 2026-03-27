@@ -21,9 +21,26 @@ import { ui } from "../styles/ui";
 const MODEL_ID = 1;
 const WALL_W = 800;
 const WALL_H = 500;
-const MODEL_URL = "/models/fasada.glb";
 const STORAGE_OUTPUT = "mapping_output_state_v1";
 const DEFAULT_VIDEO_PATH = "/videos/fasada.mp4";
+
+const MODEL_CONFIG = {
+  mickiewicz: {
+    label: "Szkoła im. Adama Mickiewicza",
+    url: "/models/fasada.glb",
+    enabled: true
+  },
+  kolejowa: {
+    label: "Fasada szkoły Kolejowej",
+    url: "/models/fasada2.glb",
+    enabled: true
+  },
+  dworzec: {
+    label: "Dworzec Główny",
+    url: "/models/fasada3.glb",
+    enabled: false
+  }
+};
 
 function safeParse(json, fallback) {
   try {
@@ -119,8 +136,20 @@ export default function ModelPage() {
   const stored = useMemo(() => getStoredEditorState(), []);
 
   const [renderMode, setRenderMode] = useState(
-    stored?.renderMode === "glb" ? "glb" : "plane"
+    stored?.renderMode === "plane" ? "plane" : "glb"
   );
+
+  const [selectedModelKey, setSelectedModelKey] = useState(() => {
+    const key = stored?.selectedModelKey;
+    return MODEL_CONFIG[key] ? key : "mickiewicz";
+  });
+
+  const selectedModel = useMemo(() => {
+    return MODEL_CONFIG[selectedModelKey] || MODEL_CONFIG.mickiewicz;
+  }, [selectedModelKey]);
+
+  const selectedModelUrl = selectedModel.url;
+  const selectedModelEnabled = selectedModel.enabled !== false;
 
   const [outputSurfaceMode, setOutputSurfaceMode] = useState(() => {
     const mode = stored?.outputSurfaceMode;
@@ -131,7 +160,7 @@ export default function ModelPage() {
   });
 
   const [outputModelUrl, setOutputModelUrl] = useState(
-    stored?.outputModelUrl || MODEL_URL
+    stored?.outputModelUrl || selectedModelUrl
   );
 
   const [mode, setMode] = useState("draw");
@@ -209,6 +238,12 @@ export default function ModelPage() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (renderMode === "glb" && selectedModelEnabled) {
+      setOutputModelUrl(selectedModelUrl);
+    }
+  }, [selectedModelUrl, renderMode, selectedModelEnabled]);
 
   const hasPolygon = useMemo(
     () => isClosed && points.length >= 3,
@@ -348,7 +383,8 @@ export default function ModelPage() {
         x: Math.round(p.x),
         y: Math.round(p.y)
       })),
-      localWarp: selectedMaskId !== null ? maskWarps[selectedMaskId] || null : draftLocalWarp
+      localWarp:
+        selectedMaskId !== null ? maskWarps[selectedMaskId] || null : draftLocalWarp
     };
 
     console.log("MASK JSON:", payload);
@@ -597,6 +633,7 @@ export default function ModelPage() {
           warp,
           projector,
           renderMode,
+          selectedModelKey,
           outputSurfaceMode,
           outputModelUrl,
           draft: {
@@ -633,6 +670,7 @@ export default function ModelPage() {
     warp,
     projector,
     renderMode,
+    selectedModelKey,
     outputSurfaceMode,
     outputModelUrl,
     selectedMaskId,
@@ -757,7 +795,7 @@ export default function ModelPage() {
 
         <div style={ui.center}>
           <SidebarPanel title="3D preview">
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
               <button
                 style={renderMode === "plane" ? ui.buttonPrimary : ui.button}
                 onClick={() => setRenderMode("plane")}
@@ -767,26 +805,84 @@ export default function ModelPage() {
               </button>
 
               <button
-                style={renderMode === "glb" ? ui.buttonPrimary : ui.button}
-                onClick={() => setRenderMode("glb")}
+                style={
+                  renderMode === "glb" && selectedModelKey === "mickiewicz"
+                    ? ui.buttonPrimary
+                    : ui.button
+                }
+                onClick={() => {
+                  setRenderMode("glb");
+                  setSelectedModelKey("mickiewicz");
+                }}
                 type="button"
               >
-                GLB
+                Szkoła im. Adama Mickiewicza
+              </button>
+
+              <button
+                style={
+                  renderMode === "glb" && selectedModelKey === "kolejowa"
+                    ? ui.buttonPrimary
+                    : ui.button
+                }
+                onClick={() => {
+                  setRenderMode("glb");
+                  setSelectedModelKey("kolejowa");
+                }}
+                type="button"
+              >
+                Fasada szkoły Kolejowej
+              </button>
+
+              <button
+                style={
+                  renderMode === "glb" && selectedModelKey === "dworzec"
+                    ? ui.buttonPrimary
+                    : ui.button
+                }
+                onClick={() => {
+                  setRenderMode("glb");
+                  setSelectedModelKey("dworzec");
+                }}
+                type="button"
+              >
+                Dworzec Główny
               </button>
             </div>
 
-            <WallScene
-              renderMode={renderMode}
-              modelUrl={MODEL_URL}
-              points={hasPolygon ? points : []}
-              opacity={opacity}
-              showGrid={showGrid}
-              warp={warp}
-              wallW={WALL_W}
-              wallH={WALL_H}
-              projectionTexture={projectionTexture}
-              projector={projector}
-            />
+            {renderMode === "plane" || selectedModelEnabled ? (
+              <WallScene
+                renderMode={renderMode}
+                modelUrl={selectedModelUrl}
+                points={hasPolygon ? points : []}
+                opacity={opacity}
+                showGrid={showGrid}
+                warp={warp}
+                wallW={WALL_W}
+                wallH={WALL_H}
+                projectionTexture={projectionTexture}
+                projector={projector}
+              />
+            ) : (
+              <div
+                style={{
+                  width: "100%",
+                  minHeight: 420,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 12,
+                  background: "rgba(255,255,255,0.03)",
+                  color: "rgba(255,255,255,0.75)",
+                  textAlign: "center",
+                  padding: 24
+                }}
+              >
+                Model <strong style={{ marginLeft: 6, marginRight: 6 }}>{selectedModel.label}</strong>
+                nie jest jeszcze dodany.
+              </div>
+            )}
           </SidebarPanel>
 
           <SidebarPanel title="2D editor">
