@@ -22,6 +22,7 @@ const MODEL_ID = 1;
 const WALL_W = 800;
 const WALL_H = 500;
 const STORAGE_OUTPUT = "mapping_output_state_v1";
+const SCENE_PRESETS_KEY = "mapping_scene_presets_v1";
 const DEFAULT_VIDEO_PATH = "/videos/fasada.mp4";
 
 const MODEL_CONFIG = {
@@ -109,6 +110,11 @@ function getStoredEditorState() {
   return safeParse(localStorage.getItem(STORAGE_OUTPUT), {});
 }
 
+function getStoredScenePresets() {
+  if (typeof window === "undefined") return [];
+  return safeParse(localStorage.getItem(SCENE_PRESETS_KEY), []);
+}
+
 function offsetPoints(points, dx, dy, wallW, wallH) {
   return (points || []).map((p) => ({
     x: Math.max(0, Math.min(wallW, Number(p.x || 0) + dx)),
@@ -129,11 +135,26 @@ function offsetWarp(warp, dx, dy, wallW, wallH, cols = 4, rows = 4) {
   };
 }
 
+function normalizeIncomingMasks(list) {
+  return (Array.isArray(list) ? list : []).map((m) => ({
+    ...m,
+    visible: m.visible !== false,
+    locked: Boolean(m.locked),
+    zIndex: typeof m.zIndex === "number" ? m.zIndex : 0
+  }));
+}
+
+function sortMasksByZIndex(list) {
+  return [...list].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+}
+
 export default function ModelPage() {
   const isOutput =
     new URLSearchParams(window.location.search).get("output") === "1";
 
   const stored = useMemo(() => getStoredEditorState(), []);
+  const [scenePresets, setScenePresets] = useState(() => getStoredScenePresets());
+  const [sceneName, setSceneName] = useState("");
 
   const [renderMode, setRenderMode] = useState(
     stored?.renderMode === "plane" ? "plane" : "glb"
@@ -223,9 +244,9 @@ export default function ModelPage() {
     (async () => {
       try {
         const data = await getMasks(MODEL_ID);
-        const normalizedMasks = Array.isArray(data) ? data : [];
+        const normalizedMasks = normalizeIncomingMasks(data);
 
-        setMasks(normalizedMasks);
+        setMasks(sortMasksByZIndex(normalizedMasks));
 
         const nextWarps = {};
         normalizedMasks.forEach((m) => {
@@ -244,6 +265,10 @@ export default function ModelPage() {
       setOutputModelUrl(selectedModelUrl);
     }
   }, [selectedModelUrl, renderMode, selectedModelEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem(SCENE_PRESETS_KEY, JSON.stringify(scenePresets));
+  }, [scenePresets]);
 
   const hasPolygon = useMemo(
     () => isClosed && points.length >= 3,
@@ -418,7 +443,7 @@ export default function ModelPage() {
       const created = await createMask(MODEL_ID, payload);
 
       setMasks((prev) =>
-        [...prev, created].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+        sortMasksByZIndex([...prev, { ...created, visible: created.visible !== false }])
       );
 
       setMaskWarps((prev) => ({
@@ -467,9 +492,17 @@ export default function ModelPage() {
       const updated = await apiUpdateMask(selectedMaskId, patch);
 
       setMasks((prev) =>
-        prev
-          .map((m) => (m.id === updated.id ? updated : m))
-          .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+        sortMasksByZIndex(
+          prev.map((m) =>
+            m.id === updated.id
+              ? {
+                  ...updated,
+                  visible: updated.visible !== false,
+                  locked: Boolean(updated.locked)
+                }
+              : m
+          )
+        )
       );
 
       setMaskWarps((prev) => ({
@@ -523,7 +556,7 @@ export default function ModelPage() {
       const created = await createMask(MODEL_ID, payload);
 
       setMasks((prev) =>
-        [...prev, created].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+        sortMasksByZIndex([...prev, { ...created, visible: created.visible !== false }])
       );
 
       setMaskWarps((prev) => ({
@@ -606,6 +639,188 @@ export default function ModelPage() {
     }));
   };
 
+  const patchMaskLocal = async (id, patch) => {
+    const current = masks.find((m) => m.id === id);
+    if (!current) return null;
+
+    const merged = { ...current, ...patch };
+
+    try {
+      const updated = await apiUpdateMask(id, {
+        name: merged.name,
+        type: merged.type,
+        operation: merged.operation,
+        zIndex: merged.zIndex,
+        visible: merged.visible,
+        locked: merged.locked,
+        layerName: merged.layerName,
+        textureType: merged.textureType,
+        textureValue: merged.textureValue,
+        opacity: merged.opacity,
+        points: (merged.points || []).map((p) => ({
+          x: Math.round(p.x),
+          y: Math.round(p.y)
+        })),
+        localWarp: maskWarps[id] || merged.localWarp || null
+      });
+
+      setMasks((prev) =>
+        sortMasksByZIndex(
+          prev.map((m) =>
+            m.id === id
+              ? {
+                  ...updated,
+                  visible: updated.visible !== false,
+                  locked: Boolean(updated.locked)
+                }
+              : m
+          )
+        )
+      );
+
+      if (selectedMaskId === id) {
+        handleSelectMask(id);
+      }
+
+      return updated;
+    } catch (e) {
+      console.error(e);
+      alert("Nie udało się wykonać akcji na masce.");
+      return null;
+    }
+  };
+
+  const toggleMaskVisible = async (id) => {
+    const mask = masks.find((m) => m.id === id);
+    if (!mask) return;
+    await patchMaskLocal(id, { visible: !mask.visible });
+  };
+
+  const toggleMaskLocked = async (id) => {
+    const mask = masks.find((m) => m.id === id);
+    if (!mask) return;
+    await patchMaskLocal(id, { locked: !mask.locked });
+  };
+
+  const moveMaskBy = async (id, delta) => {
+    const mask = masks.find((m) => m.id === id);
+    if (!mask) return;
+    await patchMaskLocal(id, { zIndex: Number(mask.zIndex || 0) + delta });
+  };
+
+  const soloMask = async (id) => {
+    const target = masks.find((m) => m.id === id);
+    if (!target) return;
+
+    const currentlySolo =
+      target.visible !== false &&
+      masks.every((m) => (m.id === id ? m.visible !== false : m.visible === false));
+
+    if (currentlySolo) {
+      await Promise.all(
+        masks.map((m) =>
+          patchMaskLocal(m.id, {
+            visible: true
+          })
+        )
+      );
+      return;
+    }
+
+    await Promise.all(
+      masks.map((m) =>
+        patchMaskLocal(m.id, {
+          visible: m.id === id
+        })
+      )
+    );
+  };
+
+  const quickShowAll = async () => {
+    await Promise.all(masks.map((m) => patchMaskLocal(m.id, { visible: true })));
+  };
+
+  const quickHideAll = async () => {
+    await Promise.all(masks.map((m) => patchMaskLocal(m.id, { visible: false })));
+  };
+
+  const quickBlackout = async () => {
+    await quickHideAll();
+  };
+
+  const quickUnlockAll = async () => {
+    await Promise.all(masks.map((m) => patchMaskLocal(m.id, { locked: false })));
+  };
+
+  const quickResetGlobalWarp = () => {
+    setWarp(createMeshWarp(WALL_W, WALL_H, 5, 5));
+  };
+
+  const saveScenePreset = () => {
+    const name = sceneName.trim();
+    if (!name) {
+      alert("Podaj nazwę sceny.");
+      return;
+    }
+
+    const snapshot = {
+      id: `${Date.now()}`,
+      name,
+      createdAt: Date.now(),
+      selectedModelKey,
+      renderMode,
+      outputSurfaceMode,
+      outputModelUrl,
+      projector,
+      warp,
+      masks: masks.map((m) => ({
+        id: m.id,
+        visible: m.visible !== false,
+        locked: Boolean(m.locked),
+        zIndex: m.zIndex ?? 0,
+        opacity: typeof m.opacity === "number" ? m.opacity : 1,
+        operation: m.operation || "add",
+        textureType: m.textureType || "color",
+        textureValue: m.textureValue || "#ffffff",
+        layerName: m.layerName || "default"
+      }))
+    };
+
+    setScenePresets((prev) => [...prev, snapshot]);
+    setSceneName("");
+  };
+
+  const loadScenePreset = async (preset) => {
+    if (!preset) return;
+
+    setSelectedModelKey(preset.selectedModelKey || "mickiewicz");
+    setRenderMode(preset.renderMode || "glb");
+    setOutputSurfaceMode(preset.outputSurfaceMode || "lightGlb");
+    setOutputModelUrl(preset.outputModelUrl || selectedModelUrl);
+    setProjector(preset.projector || projector);
+    setWarp(ensureMeshWarp(preset.warp, WALL_W, WALL_H, 5, 5));
+
+    for (const saved of preset.masks || []) {
+      const current = masks.find((m) => m.id === saved.id);
+      if (!current) continue;
+
+      await patchMaskLocal(saved.id, {
+        visible: saved.visible,
+        locked: saved.locked,
+        zIndex: saved.zIndex,
+        opacity: saved.opacity,
+        operation: saved.operation,
+        textureType: saved.textureType,
+        textureValue: saved.textureValue,
+        layerName: saved.layerName
+      });
+    }
+  };
+
+  const deleteScenePreset = (id) => {
+    setScenePresets((prev) => prev.filter((s) => s.id !== id));
+  };
+
   const handleContextMenu = (e) => {
     e.preventDefault();
     resetDraft();
@@ -614,6 +829,61 @@ export default function ModelPage() {
   useEffect(() => {
     setTextureValue((prev) => normalizeTextureValue(textureType, prev));
   }, [textureType]);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (!selectedMaskId) return;
+
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) {
+        return;
+      }
+
+      if (e.key === "v" || e.key === "V") {
+        e.preventDefault();
+        toggleMaskVisible(selectedMaskId);
+      }
+
+      if (e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        toggleMaskLocked(selectedMaskId);
+      }
+
+      if (e.key === "Delete") {
+        e.preventDefault();
+        deleteMask(selectedMaskId);
+      }
+
+      if ((e.key === "d" || e.key === "D") && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        duplicateSelected();
+      }
+
+      if (e.key === "]") {
+        e.preventDefault();
+        moveMaskBy(selectedMaskId, 1);
+      }
+
+      if (e.key === "[") {
+        e.preventDefault();
+        moveMaskBy(selectedMaskId, -1);
+      }
+
+      if (e.key === "s" || e.key === "S") {
+        e.preventDefault();
+        soloMask(selectedMaskId);
+      }
+
+      if (e.key === "b" || e.key === "B") {
+        e.preventDefault();
+        quickBlackout();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [selectedMaskId, masks, points, opacity, maskWarps]);
 
   useEffect(() => {
     if (isOutput) return;
@@ -783,12 +1053,45 @@ export default function ModelPage() {
             </div>
           </SidebarPanel>
 
+          <SidebarPanel title="Quick actions">
+            <div style={{ display: "grid", gap: 8 }}>
+              <button type="button" style={ui.button} onClick={quickShowAll}>
+                Show all
+              </button>
+              <button type="button" style={ui.button} onClick={quickHideAll}>
+                Hide all
+              </button>
+              <button type="button" style={ui.buttonDanger} onClick={quickBlackout}>
+                Blackout
+              </button>
+              <button type="button" style={ui.button} onClick={quickUnlockAll}>
+                Unlock all
+              </button>
+              <button type="button" style={ui.button} onClick={quickResetGlobalWarp}>
+                Reset global warp
+              </button>
+            </div>
+
+            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+              Skróty: V visible, L lock, S solo, [ ] z-index, Ctrl+D duplicate, B blackout, Delete usuń
+            </div>
+          </SidebarPanel>
+
           <SidebarPanel title="Saved masks">
             <MaskList
               masks={masks}
               selectedMaskId={selectedMaskId}
               onSelect={handleSelectMask}
               onDelete={deleteMask}
+              onToggleVisible={toggleMaskVisible}
+              onToggleLocked={toggleMaskLocked}
+              onMoveUp={(id) => moveMaskBy(id, 1)}
+              onMoveDown={(id) => moveMaskBy(id, -1)}
+              onDuplicate={(id) => {
+                handleSelectMask(id);
+                setTimeout(() => duplicateSelected(), 0);
+              }}
+              onSolo={soloMask}
             />
           </SidebarPanel>
         </div>
@@ -902,6 +1205,57 @@ export default function ModelPage() {
         </div>
 
         <div style={ui.sidebar}>
+          <SidebarPanel title="Scene presets">
+            <div style={{ display: "grid", gap: 8 }}>
+              <input
+                type="text"
+                value={sceneName}
+                onChange={(e) => setSceneName(e.target.value)}
+                style={ui.input}
+                placeholder="Nazwa sceny"
+              />
+              <button type="button" style={ui.buttonPrimary} onClick={saveScenePreset}>
+                Save current scene
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+              {scenePresets.length === 0 ? (
+                <div style={{ fontSize: 12, opacity: 0.75 }}>Brak zapisanych scen.</div>
+              ) : (
+                scenePresets.map((scene) => (
+                  <div
+                    key={scene.id}
+                    style={{
+                      padding: 10,
+                      borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(255,255,255,0.03)"
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, marginBottom: 8 }}>{scene.name}</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        style={ui.button}
+                        onClick={() => loadScenePreset(scene)}
+                      >
+                        Load
+                      </button>
+                      <button
+                        type="button"
+                        style={ui.buttonDanger}
+                        onClick={() => deleteScenePreset(scene.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </SidebarPanel>
+
           <SidebarPanel title="Output surface">
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ fontSize: 12, opacity: 0.8 }}>

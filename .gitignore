@@ -1,3 +1,5 @@
 nul
 mapping-frontend/public/models/fasada.glb
 mapping-frontend/public/models/fasada2.glb
+*.zip
+mapping-frontend.zip

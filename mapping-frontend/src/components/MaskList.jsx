@@ -21,11 +21,27 @@ function materialLabel(type) {
   return "color";
 }
 
+function iconButtonStyle(active = false) {
+  return {
+    ...ui.button,
+    minWidth: 34,
+    height: 34,
+    padding: "0 8px",
+    opacity: active ? 1 : 0.9
+  };
+}
+
 export default function MaskList({
   masks,
   selectedMaskId,
   onSelect,
-  onDelete
+  onDelete,
+  onToggleVisible,
+  onToggleLocked,
+  onMoveUp,
+  onMoveDown,
+  onDuplicate,
+  onSolo
 }) {
   if (masks.length === 0) {
     return <div style={ui.small}>Brak zapisanych masek</div>;
@@ -57,7 +73,7 @@ export default function MaskList({
                 alignItems: "start"
               }}
             >
-              <div style={{ minWidth: 0 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontWeight: 800 }}>{m.name}</div>
 
                 <div style={ui.small}>
@@ -78,6 +94,87 @@ export default function MaskList({
                   {m.locked ? "yes" : "no"}
                 </div>
               </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                flexWrap: "wrap",
+                marginTop: 10
+              }}
+            >
+              <button
+                type="button"
+                style={iconButtonStyle(m.visible !== false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleVisible?.(m.id);
+                }}
+                title="Visible"
+              >
+                {m.visible === false ? "🙈" : "👁"}
+              </button>
+
+              <button
+                type="button"
+                style={iconButtonStyle(m.locked)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleLocked?.(m.id);
+                }}
+                title="Lock"
+              >
+                {m.locked ? "🔒" : "🔓"}
+              </button>
+
+              <button
+                type="button"
+                style={iconButtonStyle(false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSolo?.(m.id);
+                }}
+                title="Solo"
+              >
+                S
+              </button>
+
+              <button
+                type="button"
+                style={iconButtonStyle(false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMoveUp?.(m.id);
+                }}
+                title="Move up"
+              >
+                ↑
+              </button>
+
+              <button
+                type="button"
+                style={iconButtonStyle(false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMoveDown?.(m.id);
+                }}
+                title="Move down"
+              >
+                ↓
+              </button>
+
+              <button
+                type="button"
+                style={iconButtonStyle(false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDuplicate?.(m.id);
+                }}
+                title="Duplicate"
+              >
+                ⧉
+              </button>
 
               <button
                 style={ui.buttonDanger}
@@ -86,6 +183,7 @@ export default function MaskList({
                   e.stopPropagation();
                   onDelete(m.id);
                 }}
+                title="Delete"
               >
                 Delete
               </button>
