@@ -498,6 +498,16 @@ function WarpOutputSurface({ texture, warp, wallW, wallH }) {
   );
 }
 
+function revivePlayableVideos(videoCache) {
+  if (!videoCache?.current) return;
+
+  videoCache.current.forEach((entry) => {
+    if (entry?.video && !entry?.runtimeSettings?.paused) {
+      safePlay(entry.video);
+    }
+  });
+}
+
 function OutputPipeline({
   state,
   wallW,
@@ -587,7 +597,23 @@ function OutputPipeline({
   }, [projectionAsset]);
 
   useEffect(() => {
+    const handleVisibility = () => {
+      revivePlayableVideos(videoCache);
+    };
+
+    const handleFocus = () => {
+      revivePlayableVideos(videoCache);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handleFocus);
+
     return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handleFocus);
+
       videoCache.current.forEach((entry) => {
         if (entry?.video) {
           entry.video.pause();
@@ -601,11 +627,7 @@ function OutputPipeline({
   useFrame(() => {
     if (!projectionAsset) return;
 
-    videoCache.current.forEach((entry) => {
-      if (entry?.video) {
-        safePlay(entry.video);
-      }
-    });
+    revivePlayableVideos(videoCache);
 
     projectionAsset.redraw();
     projectionAsset.texture.needsUpdate = true;
@@ -803,4 +825,4 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
       </Canvas>
     </div>
   );
-}
+} 

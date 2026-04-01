@@ -12,6 +12,26 @@ export function safePlay(video) {
   }
 }
 
+function clampVideoTime(video, seconds) {
+  const duration = Number(video?.duration);
+  const safeSeconds = Math.max(0, Number(seconds || 0));
+
+  if (Number.isFinite(duration) && duration > 0) {
+    return Math.min(safeSeconds, Math.max(0, duration - 0.05));
+  }
+
+  return safeSeconds;
+}
+
+function normalizeVideoSettings(settings = {}) {
+  return {
+    startOffset: Math.max(0, Number(settings?.startOffset || 0)),
+    playbackRate: Math.max(0.1, Number(settings?.playbackRate || 1) || 1),
+    paused: Boolean(settings?.paused),
+    loop: settings?.loop !== false
+  };
+}
+
 function createBuffer(w, h) {
   const canvas = document.createElement("canvas");
   canvas.width = w;
@@ -95,32 +115,100 @@ function loadImage(src, imageCache, onReady) {
   return null;
 }
 
-function getLoadedVideo(src, videoCache) {
-  if (!src) return null;
-  const cached = videoCache.current.get(src);
+function applyVideoSettings(entry, settings = {}) {
+  const video = entry?.video;
+  if (!video) return;
+
+  const normalized = normalizeVideoSettings(settings);
+  entry.runtimeSettings = normalized;
+
+  video.playbackRate = normalized.playbackRate;
+  video.defaultPlaybackRate = normalized.playbackRate;
+  video.loop = false;
+
+  const startOffset = clampVideoTime(video, normalized.startOffset);
+
+  const settingsChanged =
+    entry.lastAppliedStartOffset !== normalized.startOffset ||
+    entry.lastAppliedPlaybackRate !== normalized.playbackRate ||
+    entry.lastAppliedPaused !== normalized.paused ||
+    entry.lastAppliedLoop !== normalized.loop;
+
+  if (!entry.startOffsetApplied || settingsChanged) {
+    if (video.readyState >= 1) {
+      try {
+        video.currentTime = startOffset;
+      } catch {
+        //
+      }
+      entry.startOffsetApplied = true;
+      entry.pendingStartOffset = null;
+    } else {
+      entry.pendingStartOffset = startOffset;
+      entry.startOffsetApplied = false;
+    }
+  }
+
+  if (entry.onEnded) {
+    video.removeEventListener("ended", entry.onEnded);
+    entry.onEnded = null;
+  }
+
+  if (normalized.loop) {
+    entry.onEnded = () => {
+      const restartAt = clampVideoTime(video, normalized.startOffset);
+      try {
+        video.currentTime = restartAt;
+      } catch {
+        //
+      }
+
+      if (!normalized.paused) {
+        safePlay(video);
+      }
+    };
+
+    video.addEventListener("ended", entry.onEnded);
+  }
+
+  if (normalized.paused) {
+    video.pause();
+  } else {
+    safePlay(video);
+  }
+
+  entry.lastAppliedStartOffset = normalized.startOffset;
+  entry.lastAppliedPlaybackRate = normalized.playbackRate;
+  entry.lastAppliedPaused = normalized.paused;
+  entry.lastAppliedLoop = normalized.loop;
+}
+
+function getLoadedVideo(cacheKey, videoCache, settings) {
+  if (!cacheKey) return null;
+  const cached = videoCache.current.get(cacheKey);
   if (!cached) return null;
 
   if (
     (cached.status === "loaded" || cached.status === "playing") &&
     cached.video
   ) {
-    safePlay(cached.video);
+    applyVideoSettings(cached, settings);
     return cached.video;
   }
 
   return null;
 }
 
-function loadVideo(src, videoCache, onReady) {
-  if (!src) return null;
+function loadVideo(cacheKey, src, videoCache, settings, onReady) {
+  if (!src || !cacheKey) return null;
 
-  const cached = videoCache.current.get(src);
+  const cached = videoCache.current.get(cacheKey);
   if (cached) {
     if (
       (cached.status === "loaded" || cached.status === "playing") &&
       cached.video
     ) {
-      safePlay(cached.video);
+      applyVideoSettings(cached, settings);
       return cached.video;
     }
     return null;
@@ -129,7 +217,6 @@ function loadVideo(src, videoCache, onReady) {
   const video = document.createElement("video");
   video.src = src;
   video.crossOrigin = "anonymous";
-  video.loop = true;
   video.muted = true;
   video.autoplay = true;
   video.playsInline = true;
@@ -137,21 +224,41 @@ function loadVideo(src, videoCache, onReady) {
 
   const entry = {
     status: "loading",
-    video
+    video,
+    runtimeSettings: normalizeVideoSettings(settings),
+    startOffsetApplied: false,
+    pendingStartOffset: null,
+    onEnded: null,
+    lastAppliedStartOffset: null,
+    lastAppliedPlaybackRate: null,
+    lastAppliedPaused: null,
+    lastAppliedLoop: null
   };
 
-  videoCache.current.set(src, entry);
+  videoCache.current.set(cacheKey, entry);
 
   const markReady = () => {
     if (entry.status !== "playing") {
       entry.status = "loaded";
     }
-    safePlay(video);
+
+    if (entry.pendingStartOffset !== null && video.readyState >= 1) {
+      try {
+        video.currentTime = clampVideoTime(video, entry.pendingStartOffset);
+      } catch {
+        //
+      }
+      entry.startOffsetApplied = true;
+      entry.pendingStartOffset = null;
+    }
+
+    applyVideoSettings(entry, settings);
     onReady?.();
   };
 
   const markPlaying = () => {
     entry.status = "playing";
+    applyVideoSettings(entry, settings);
     onReady?.();
   };
 
@@ -166,7 +273,7 @@ function loadVideo(src, videoCache, onReady) {
   video.addEventListener("error", markError);
 
   video.load();
-  safePlay(video);
+  applyVideoSettings(entry, settings);
 
   return null;
 }
@@ -329,20 +436,40 @@ export function parseLayerDirectives(layerName = "") {
 
   const blendMatch = text.match(/\[blend:([a-z-]+)\]/i);
   const featherMatch = text.match(/\[feather:(\d+)\]/i);
+  const videoStartMatch = text.match(/\[video-start:([^\]]+)\]/i);
+  const videoSpeedMatch = text.match(/\[video-speed:([^\]]+)\]/i);
+  const videoPausedMatch = text.match(/\[video-paused:([^\]]+)\]/i);
+  const videoLoopMatch = text.match(/\[video-loop:([^\]]+)\]/i);
 
   const blend = (blendMatch?.[1] || "source-over").toLowerCase();
   const feather = Math.max(0, Number(featherMatch?.[1] || 0));
+  const videoStart = Math.max(0, Number(videoStartMatch?.[1] || 0));
+  const videoSpeed = Math.max(0.1, Number(videoSpeedMatch?.[1] || 1) || 1);
+  const videoPaused = ["1", "true", "yes", "on"].includes(
+    String(videoPausedMatch?.[1] || "0").toLowerCase()
+  );
+  const videoLoop = !["0", "false", "no", "off"].includes(
+    String(videoLoopMatch?.[1] || "1").toLowerCase()
+  );
 
   const label = text
     .replace(/\[blend:[^\]]+\]/gi, "")
     .replace(/\[feather:[^\]]+\]/gi, "")
+    .replace(/\[video-start:[^\]]+\]/gi, "")
+    .replace(/\[video-speed:[^\]]+\]/gi, "")
+    .replace(/\[video-paused:[^\]]+\]/gi, "")
+    .replace(/\[video-loop:[^\]]+\]/gi, "")
     .trim();
 
   return {
     raw: text,
     label,
     blend,
-    feather
+    feather,
+    videoStart,
+    videoSpeed,
+    videoPaused,
+    videoLoop
   };
 }
 
@@ -411,15 +538,26 @@ function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) 
   }
 
   if (textureType === "video") {
+    const videoSettings = {
+      startOffset: directives.videoStart,
+      playbackRate: directives.videoSpeed,
+      paused: directives.videoPaused,
+      loop: directives.videoLoop
+    };
+
+    const videoCacheKey = `${shape?.id ?? shape?.name ?? textureValue}::${textureValue}`;
+
     const loadedVideo =
-      getLoadedVideo(textureValue, videoCache) ||
-      loadVideo(textureValue, videoCache, onAssetReady);
+      getLoadedVideo(videoCacheKey, videoCache, videoSettings) ||
+      loadVideo(videoCacheKey, textureValue, videoCache, videoSettings, onAssetReady);
 
     ctx.save();
     ctx.clip();
 
     if (loadedVideo && loadedVideo.readyState >= 2) {
-      safePlay(loadedVideo);
+      if (!videoSettings.paused) {
+        safePlay(loadedVideo);
+      }
       ctx.drawImage(loadedVideo, 0, 0, wallW, wallH);
     } else {
       ctx.fillStyle = "rgba(255,255,255,0.9)";

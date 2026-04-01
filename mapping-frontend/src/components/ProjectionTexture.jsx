@@ -52,7 +52,7 @@ export default function ProjectionTexture({
 
     const loop = () => {
       videoCache.current.forEach((entry) => {
-        if (entry?.video) {
+        if (entry?.video && !entry?.runtimeSettings?.paused) {
           safePlay(entry.video);
         }
       });
@@ -74,7 +74,7 @@ export default function ProjectionTexture({
   useEffect(() => {
     const reviveVideos = () => {
       videoCache.current.forEach((entry) => {
-        if (entry?.video) {
+        if (entry?.video && !entry?.runtimeSettings?.paused) {
           safePlay(entry.video);
         }
       });

@@ -16,18 +16,42 @@ function parseLayerMeta(layerName = "") {
   const text = String(layerName || "");
   const blendMatch = text.match(/\[blend:([a-z-]+)\]/i);
   const featherMatch = text.match(/\[feather:(\d+)\]/i);
+  const videoStartMatch = text.match(/\[video-start:([^\]]+)\]/i);
+  const videoSpeedMatch = text.match(/\[video-speed:([^\]]+)\]/i);
+  const videoPausedMatch = text.match(/\[video-paused:([^\]]+)\]/i);
+  const videoLoopMatch = text.match(/\[video-loop:([^\]]+)\]/i);
 
   return {
     baseName: text
       .replace(/\[blend:[^\]]+\]/gi, "")
       .replace(/\[feather:[^\]]+\]/gi, "")
+      .replace(/\[video-start:[^\]]+\]/gi, "")
+      .replace(/\[video-speed:[^\]]+\]/gi, "")
+      .replace(/\[video-paused:[^\]]+\]/gi, "")
+      .replace(/\[video-loop:[^\]]+\]/gi, "")
       .trim(),
     blend: (blendMatch?.[1] || "source-over").toLowerCase(),
-    feather: Math.max(0, Number(featherMatch?.[1] || 0))
+    feather: Math.max(0, Number(featherMatch?.[1] || 0)),
+    videoStart: Math.max(0, Number(videoStartMatch?.[1] || 0)),
+    videoSpeed: Math.max(0.1, Number(videoSpeedMatch?.[1] || 1) || 1),
+    videoPaused: ["1", "true", "yes", "on"].includes(
+      String(videoPausedMatch?.[1] || "0").toLowerCase()
+    ),
+    videoLoop: !["0", "false", "no", "off"].includes(
+      String(videoLoopMatch?.[1] || "1").toLowerCase()
+    )
   };
 }
 
-function buildLayerName(baseName, blend, feather) {
+function buildLayerName(
+  baseName,
+  blend,
+  feather,
+  videoStart,
+  videoSpeed,
+  videoPaused,
+  videoLoop
+) {
   const parts = [];
   const trimmedBase = String(baseName || "").trim();
 
@@ -39,6 +63,22 @@ function buildLayerName(baseName, blend, feather) {
 
   if (Number(feather || 0) > 0) {
     parts.push(`[feather:${Math.max(0, Number(feather || 0))}]`);
+  }
+
+  if (Number(videoStart || 0) > 0) {
+    parts.push(`[video-start:${Math.max(0, Number(videoStart || 0))}]`);
+  }
+
+  if (Number(videoSpeed || 1) !== 1) {
+    parts.push(`[video-speed:${Math.max(0.1, Number(videoSpeed || 1))}]`);
+  }
+
+  if (videoPaused) {
+    parts.push("[video-paused:true]");
+  }
+
+  if (videoLoop === false) {
+    parts.push("[video-loop:false]");
   }
 
   return parts.join(" ").trim() || "default";
@@ -82,13 +122,21 @@ export default function Toolbar({
   const baseLayerName = meta.baseName || "default";
   const blend = meta.blend || "source-over";
   const feather = meta.feather || 0;
+  const videoStart = meta.videoStart || 0;
+  const videoSpeed = meta.videoSpeed || 1;
+  const videoPaused = meta.videoPaused || false;
+  const videoLoop = meta.videoLoop !== false;
 
   const setLayerMeta = (next) => {
     setLayerName(
       buildLayerName(
         next.baseName ?? baseLayerName,
         next.blend ?? blend,
-        next.feather ?? feather
+        next.feather ?? feather,
+        next.videoStart ?? videoStart,
+        next.videoSpeed ?? videoSpeed,
+        next.videoPaused ?? videoPaused,
+        next.videoLoop ?? videoLoop
       )
     );
   };
@@ -258,6 +306,105 @@ export default function Toolbar({
           </div>
         )}
       </div>
+
+      {textureType === "video" && (
+        <div
+          style={{
+            border: "1px solid rgba(255,255,255,0.12)",
+            borderRadius: 10,
+            padding: 12,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12
+          }}
+        >
+          <div style={{ ...ui.label, marginBottom: 0 }}>Video playback</div>
+
+          <div>
+            <div style={ui.label}>Start time / offset: {videoStart.toFixed(2)}s</div>
+            <input
+              style={{ width: "100%" }}
+              type="range"
+              min="0"
+              max="60"
+              step="0.1"
+              value={videoStart}
+              onChange={(e) =>
+                setLayerMeta({ videoStart: Number(e.target.value || 0) })
+              }
+            />
+            <input
+              style={ui.input}
+              type="number"
+              min="0"
+              step="0.1"
+              value={videoStart}
+              onChange={(e) =>
+                setLayerMeta({ videoStart: Number(e.target.value || 0) })
+              }
+            />
+          </div>
+
+          <div>
+            <div style={ui.label}>Speed: {videoSpeed.toFixed(2)}x</div>
+            <input
+              style={{ width: "100%" }}
+              type="range"
+              min="0.1"
+              max="3"
+              step="0.1"
+              value={videoSpeed}
+              onChange={(e) =>
+                setLayerMeta({ videoSpeed: Number(e.target.value || 1) })
+              }
+            />
+            <input
+              style={ui.input}
+              type="number"
+              min="0.1"
+              max="10"
+              step="0.1"
+              value={videoSpeed}
+              onChange={(e) =>
+                setLayerMeta({ videoSpeed: Number(e.target.value || 1) })
+              }
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              style={videoPaused ? ui.button : ui.buttonPrimary}
+              onClick={() => setLayerMeta({ videoPaused: !videoPaused })}
+            >
+              {videoPaused ? "Play" : "Pause"}
+            </button>
+
+            <button
+              type="button"
+              style={videoLoop ? ui.buttonPrimary : ui.button}
+              onClick={() => setLayerMeta({ videoLoop: !videoLoop })}
+            >
+              Loop: {videoLoop ? "ON" : "OFF"}
+            </button>
+
+            <button
+              type="button"
+              style={ui.button}
+              onClick={() =>
+                setLayerMeta({
+                  videoStart: 0,
+                  videoSpeed: 1,
+                  videoPaused: false,
+                  videoLoop: true
+                })
+              }
+            >
+              Reset video
+            </button>
+          </div>
+        </div>
+      )}
 
       <div>
         <div style={ui.label}>Z-index</div>
