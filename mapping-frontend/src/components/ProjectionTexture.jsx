@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createProjectionTextureAsset,
   safePlay
@@ -15,7 +15,11 @@ export default function ProjectionTexture({
 }) {
   const imageCache = useRef(new Map());
   const videoCache = useRef(new Map());
-  const [forceVersion, setForceVersion] = useState(0);
+  const [refreshValue, setRefreshValue] = useState(0);
+
+  const requestRefresh = useCallback(() => {
+    setRefreshValue((v) => v + 1);
+  }, []);
 
   const asset = useMemo(
     () =>
@@ -28,9 +32,7 @@ export default function ProjectionTexture({
         activeDraft,
         imageCache,
         videoCache,
-        onAssetReady: () => {
-          setForceVersion((v) => v + 1);
-        }
+        onAssetReady: requestRefresh
       }),
     [
       wallW,
@@ -39,7 +41,8 @@ export default function ProjectionTexture({
       showPinkBackground,
       masks,
       activeDraft,
-      forceVersion
+      requestRefresh,
+      refreshValue
     ]
   );
 

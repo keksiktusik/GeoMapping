@@ -1,5 +1,8 @@
 import { ui } from "../styles/ui";
 
+const DEPTH_MIN = -50;
+const DEPTH_MAX = 50;
+
 function parseLayerMeta(layerName = "") {
   const text = String(layerName || "");
   const blendMatch = text.match(/\[blend:([a-z-]+)\]/i);
@@ -41,7 +44,8 @@ export default function MaskList({
   onMoveUp,
   onMoveDown,
   onDuplicate,
-  onSolo
+  onSolo,
+  onDepthChange
 }) {
   if (masks.length === 0) {
     return <div style={ui.small}>Brak zapisanych masek</div>;
@@ -52,6 +56,7 @@ export default function MaskList({
       {masks.map((m) => {
         const active = m.id === selectedMaskId;
         const meta = parseLayerMeta(m.layerName);
+        const currentDepth = Number(m.zIndex ?? 0);
 
         return (
           <div
@@ -78,7 +83,7 @@ export default function MaskList({
 
                 <div style={ui.small}>
                   type: {m.type} • mat: {materialLabel(m.textureType)} • op:{" "}
-                  {m.operation || "add"} • z: {m.zIndex ?? 0}
+                  {m.operation || "add"} • głębokość: {currentDepth}
                 </div>
 
                 <div style={ui.small}>
@@ -93,14 +98,30 @@ export default function MaskList({
                   visible: {m.visible === false ? " no" : " yes"} • locked:{" "}
                   {m.locked ? "yes" : "no"}
                 </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ ...ui.small, marginBottom: 6 }}>
+                    Głębokość: {currentDepth}
+                  </div>
+                  <input
+                    type="range"
+                    min={DEPTH_MIN}
+                    max={DEPTH_MAX}
+                    step="1"
+                    value={currentDepth}
+                    style={{ width: "100%" }}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => onDepthChange?.(m.id, Number(e.target.value || 0))}
+                  />
+                </div>
               </div>
             </div>
 
             <div
               style={{
                 display: "flex",
-                gap: 6,
                 flexWrap: "wrap",
+                gap: 8,
                 marginTop: 10
               }}
             >
@@ -109,11 +130,11 @@ export default function MaskList({
                 style={iconButtonStyle(m.visible !== false)}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onToggleVisible?.(m.id);
+                  onToggleVisible(m.id);
                 }}
                 title="Visible"
               >
-                {m.visible === false ? "🙈" : "👁"}
+                {m.visible !== false ? "👁" : "🚫"}
               </button>
 
               <button
@@ -121,7 +142,7 @@ export default function MaskList({
                 style={iconButtonStyle(m.locked)}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onToggleLocked?.(m.id);
+                  onToggleLocked(m.id);
                 }}
                 title="Lock"
               >
@@ -145,7 +166,7 @@ export default function MaskList({
                 style={iconButtonStyle(false)}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onMoveUp?.(m.id);
+                  onMoveUp(m.id);
                 }}
                 title="Move up"
               >
@@ -157,7 +178,7 @@ export default function MaskList({
                 style={iconButtonStyle(false)}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onMoveDown?.(m.id);
+                  onMoveDown(m.id);
                 }}
                 title="Move down"
               >

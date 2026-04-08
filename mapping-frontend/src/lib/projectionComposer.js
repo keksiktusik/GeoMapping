@@ -185,15 +185,22 @@ function applyVideoSettings(entry, settings = {}) {
 
 function getLoadedVideo(cacheKey, videoCache, settings) {
   if (!cacheKey) return null;
-  const cached = videoCache.current.get(cacheKey);
-  if (!cached) return null;
 
-  if (
-    (cached.status === "loaded" || cached.status === "playing") &&
-    cached.video
-  ) {
+  const cached = videoCache.current.get(cacheKey);
+  if (!cached?.video) return null;
+
+  const { video } = cached;
+
+  // ważne: nie opieramy się tylko na cached.status,
+  // bo w osobnym oknie / output status potrafi zostać na "loading",
+  // mimo że video ma już dane gotowe do rysowania
+  if (video.readyState >= 2) {
+    if (cached.status !== "playing") {
+      cached.status = "loaded";
+    }
+
     applyVideoSettings(cached, settings);
-    return cached.video;
+    return video;
   }
 
   return null;
@@ -203,11 +210,11 @@ function loadVideo(cacheKey, src, videoCache, settings, onReady) {
   if (!src || !cacheKey) return null;
 
   const cached = videoCache.current.get(cacheKey);
-  if (cached) {
-    if (
-      (cached.status === "loaded" || cached.status === "playing") &&
-      cached.video
-    ) {
+  if (cached?.video) {
+    if (cached.video.readyState >= 2) {
+      if (cached.status !== "playing") {
+        cached.status = "loaded";
+      }
       applyVideoSettings(cached, settings);
       return cached.video;
     }
@@ -218,9 +225,15 @@ function loadVideo(cacheKey, src, videoCache, settings, onReady) {
   video.src = src;
   video.crossOrigin = "anonymous";
   video.muted = true;
+  video.defaultMuted = true;
   video.autoplay = true;
   video.playsInline = true;
   video.preload = "auto";
+  video.loop = false;
+
+  video.setAttribute("muted", "");
+  video.setAttribute("playsinline", "");
+  video.setAttribute("webkit-playsinline", "");
 
   const entry = {
     status: "loading",
@@ -238,22 +251,24 @@ function loadVideo(cacheKey, src, videoCache, settings, onReady) {
   videoCache.current.set(cacheKey, entry);
 
   const markReady = () => {
-    if (entry.status !== "playing") {
-      entry.status = "loaded";
-    }
-
-    if (entry.pendingStartOffset !== null && video.readyState >= 1) {
-      try {
-        video.currentTime = clampVideoTime(video, entry.pendingStartOffset);
-      } catch {
-        //
+    if (video.readyState >= 2) {
+      if (entry.status !== "playing") {
+        entry.status = "loaded";
       }
-      entry.startOffsetApplied = true;
-      entry.pendingStartOffset = null;
-    }
 
-    applyVideoSettings(entry, settings);
-    onReady?.();
+      if (entry.pendingStartOffset !== null && video.readyState >= 1) {
+        try {
+          video.currentTime = clampVideoTime(video, entry.pendingStartOffset);
+        } catch {
+          //
+        }
+        entry.startOffsetApplied = true;
+        entry.pendingStartOffset = null;
+      }
+
+      applyVideoSettings(entry, settings);
+      onReady?.();
+    }
   };
 
   const markPlaying = () => {
@@ -267,8 +282,10 @@ function loadVideo(cacheKey, src, videoCache, settings, onReady) {
     onReady?.();
   };
 
+  video.addEventListener("loadedmetadata", markReady);
   video.addEventListener("loadeddata", markReady);
   video.addEventListener("canplay", markReady);
+  video.addEventListener("canplaythrough", markReady);
   video.addEventListener("play", markPlaying);
   video.addEventListener("error", markError);
 

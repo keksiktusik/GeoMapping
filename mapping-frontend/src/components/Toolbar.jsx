@@ -1,7 +1,16 @@
+import { useEffect, useMemo, useState } from "react";
 import { ui } from "../styles/ui";
 
 const DEFAULT_IMAGE_PATH = "/textures/window.jpg";
 const DEFAULT_VIDEO_PATH = "/videos/fasada.mp4";
+const DEPTH_MIN = -50;
+const DEPTH_MAX = 50;
+
+function clampDepth(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(DEPTH_MIN, Math.min(DEPTH_MAX, Math.round(num)));
+}
 
 function getDefaultTextureValue(type, currentValue = "") {
   if (type === "color") {
@@ -101,6 +110,9 @@ export default function Toolbar({
   setOperation,
   zIndex,
   setZIndex,
+  selectedMaskId,
+  onDepthPreview,
+  onDepthCommit,
   visible,
   setVisible,
   locked,
@@ -126,6 +138,18 @@ export default function Toolbar({
   const videoSpeed = meta.videoSpeed || 1;
   const videoPaused = meta.videoPaused || false;
   const videoLoop = meta.videoLoop !== false;
+  const hasSelectedMask = selectedMaskId !== null && selectedMaskId !== undefined;
+
+  const [depthDraft, setDepthDraft] = useState(() => clampDepth(zIndex));
+
+  useEffect(() => {
+    setDepthDraft(clampDepth(zIndex));
+  }, [zIndex, selectedMaskId]);
+
+  const depthLabel = useMemo(() => {
+    if (depthDraft > 0) return `+${depthDraft}`;
+    return `${depthDraft}`;
+  }, [depthDraft]);
 
   const setLayerMeta = (next) => {
     setLayerName(
@@ -149,6 +173,20 @@ export default function Toolbar({
 
   const applyDefaultAssetPath = () => {
     setTextureValue(getDefaultTextureValue(textureType, ""));
+  };
+
+  const previewDepth = (rawValue) => {
+    const nextValue = clampDepth(rawValue);
+    setDepthDraft(nextValue);
+    setZIndex(nextValue);
+    onDepthPreview?.(nextValue);
+  };
+
+  const commitDepth = (rawValue = depthDraft) => {
+    const nextValue = clampDepth(rawValue);
+    setDepthDraft(nextValue);
+    setZIndex(nextValue);
+    onDepthCommit?.(nextValue);
   };
 
   return (
@@ -185,19 +223,58 @@ export default function Toolbar({
           value={operation}
           onChange={(e) => setOperation(e.target.value)}
         >
-          <option value="add">Normal</option>
-          <option value="subtract">Cutout / wytnij</option>
-          <option value="intersect">Mask / zostaw część wspólną</option>
+          <option value="add">add</option>
+          <option value="subtract">subtract</option>
+          <option value="intersect">intersect</option>
         </select>
       </div>
 
       <div>
-        <div style={ui.label}>Nazwa warstwy</div>
+        <div style={ui.label}>
+          Głębokość maski {hasSelectedMask ? `(${depthLabel})` : ""}
+        </div>
+
+        <input
+          type="range"
+          min={DEPTH_MIN}
+          max={DEPTH_MAX}
+          step="1"
+          value={depthDraft}
+          disabled={!hasSelectedMask}
+          style={{ width: "100%", opacity: hasSelectedMask ? 1 : 0.5 }}
+          onChange={(e) => previewDepth(e.target.value)}
+          onMouseUp={(e) => commitDepth(e.target.value)}
+          onTouchEnd={(e) => commitDepth(e.target.value)}
+        />
+
+        <div style={ui.small}>
+          {hasSelectedMask
+            ? `Aktualna głębokość: ${depthLabel}`
+            : "Najpierw wybierz zapisaną maskę"}
+        </div>
+      </div>
+
+      <div>
+        <div style={ui.label}>Opacity</div>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={opacity}
+          onChange={(e) => setOpacity(Number(e.target.value))}
+          style={{ width: "100%" }}
+        />
+        <div style={ui.small}>{opacity.toFixed(2)}</div>
+      </div>
+
+      <div>
+        <div style={ui.label}>Layer name</div>
         <input
           style={ui.input}
           value={baseLayerName}
           onChange={(e) => setLayerMeta({ baseName: e.target.value })}
-          placeholder="np. facade-base"
+          placeholder="default"
         />
       </div>
 
@@ -208,36 +285,33 @@ export default function Toolbar({
           value={blend}
           onChange={(e) => setLayerMeta({ blend: e.target.value })}
         >
-          <option value="source-over">Normal</option>
-          <option value="multiply">Multiply</option>
-          <option value="screen">Screen</option>
-          <option value="overlay">Overlay</option>
-          <option value="lighten">Lighten</option>
-          <option value="darken">Darken</option>
-          <option value="hard-light">Hard light</option>
-          <option value="soft-light">Soft light</option>
-          <option value="difference">Difference</option>
-          <option value="exclusion">Exclusion</option>
+          <option value="source-over">normal</option>
+          <option value="multiply">multiply</option>
+          <option value="screen">screen</option>
+          <option value="overlay">overlay</option>
+          <option value="lighten">lighten</option>
+          <option value="darken">darken</option>
+          <option value="color-dodge">color-dodge</option>
+          <option value="color-burn">color-burn</option>
         </select>
       </div>
 
       <div>
-        <div style={ui.label}>Feather krawędzi: {feather}px</div>
+        <div style={ui.label}>Feather</div>
         <input
-          style={{ width: "100%" }}
           type="range"
           min="0"
-          max="20"
+          max="50"
           step="1"
           value={feather}
-          onChange={(e) =>
-            setLayerMeta({ feather: Number(e.target.value || 0) })
-          }
+          onChange={(e) => setLayerMeta({ feather: Number(e.target.value) })}
+          style={{ width: "100%" }}
         />
+        <div style={ui.small}>{feather}px</div>
       </div>
 
       <div>
-        <div style={ui.label}>Projection material</div>
+        <div style={ui.label}>Texture type</div>
         <select
           style={ui.input}
           value={textureType}
@@ -250,94 +324,35 @@ export default function Toolbar({
       </div>
 
       <div>
-        <div style={ui.label}>Material value</div>
-
-        {textureType === "color" ? (
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              style={{ ...ui.input, height: 42, padding: 4, minWidth: 64 }}
-              type="color"
-              value={textureValue || "#ffffff"}
-              onChange={(e) => setTextureValue(e.target.value)}
-            />
-
-            <input
-              style={ui.input}
-              value={textureValue || "#ffffff"}
-              onChange={(e) => setTextureValue(e.target.value)}
-              placeholder="#ffffff"
-            />
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <input
-              style={ui.input}
-              value={textureValue || ""}
-              onChange={(e) => setTextureValue(e.target.value)}
-              placeholder={
-                textureType === "image"
-                  ? "np. /textures/window.jpg"
-                  : "np. /videos/fasada.mp4"
-              }
-            />
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                style={ui.button}
-                type="button"
-                onClick={applyDefaultAssetPath}
-              >
-                Ustaw domyślną ścieżkę
-              </button>
-
-              <div
-                style={{
-                  fontSize: 12,
-                  opacity: 0.8,
-                  display: "flex",
-                  alignItems: "center"
-                }}
-              >
-                {textureType === "image"
-                  ? `np. ${DEFAULT_IMAGE_PATH}`
-                  : `np. ${DEFAULT_VIDEO_PATH}`}
-              </div>
-            </div>
-          </div>
-        )}
+        <div style={ui.label}>Texture value</div>
+        <input
+          style={ui.input}
+          value={textureValue}
+          onChange={(e) => setTextureValue(e.target.value)}
+          placeholder={
+            textureType === "color"
+              ? "#ffffff"
+              : textureType === "image"
+              ? "/textures/window.jpg"
+              : "/videos/fasada.mp4"
+          }
+        />
+        <div style={{ marginTop: 8 }}>
+          <button type="button" style={ui.button} onClick={applyDefaultAssetPath}>
+            Ustaw domyślną ścieżkę
+          </button>
+        </div>
       </div>
 
       {textureType === "video" && (
-        <div
-          style={{
-            border: "1px solid rgba(255,255,255,0.12)",
-            borderRadius: 10,
-            padding: 12,
-            display: "flex",
-            flexDirection: "column",
-            gap: 12
-          }}
-        >
-          <div style={{ ...ui.label, marginBottom: 0 }}>Video playback</div>
-
+        <>
           <div>
-            <div style={ui.label}>Start time / offset: {videoStart.toFixed(2)}s</div>
+            <div style={ui.label}>Video start</div>
             <input
-              style={{ width: "100%" }}
-              type="range"
-              min="0"
-              max="60"
-              step="0.1"
-              value={videoStart}
-              onChange={(e) =>
-                setLayerMeta({ videoStart: Number(e.target.value || 0) })
-              }
-            />
-            <input
-              style={ui.input}
               type="number"
               min="0"
               step="0.1"
+              style={ui.input}
               value={videoStart}
               onChange={(e) =>
                 setLayerMeta({ videoStart: Number(e.target.value || 0) })
@@ -346,24 +361,12 @@ export default function Toolbar({
           </div>
 
           <div>
-            <div style={ui.label}>Speed: {videoSpeed.toFixed(2)}x</div>
+            <div style={ui.label}>Video speed</div>
             <input
-              style={{ width: "100%" }}
-              type="range"
-              min="0.1"
-              max="3"
-              step="0.1"
-              value={videoSpeed}
-              onChange={(e) =>
-                setLayerMeta({ videoSpeed: Number(e.target.value || 1) })
-              }
-            />
-            <input
-              style={ui.input}
               type="number"
               min="0.1"
-              max="10"
               step="0.1"
+              style={ui.input}
               value={videoSpeed}
               onChange={(e) =>
                 setLayerMeta({ videoSpeed: Number(e.target.value || 1) })
@@ -371,126 +374,42 @@ export default function Toolbar({
             />
           </div>
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8 }}>
             <button
               type="button"
-              style={videoPaused ? ui.button : ui.buttonPrimary}
+              style={ui.button}
               onClick={() => setLayerMeta({ videoPaused: !videoPaused })}
             >
-              {videoPaused ? "Play" : "Pause"}
-            </button>
-
-            <button
-              type="button"
-              style={videoLoop ? ui.buttonPrimary : ui.button}
-              onClick={() => setLayerMeta({ videoLoop: !videoLoop })}
-            >
-              Loop: {videoLoop ? "ON" : "OFF"}
+              {videoPaused ? "Resume video" : "Pause video"}
             </button>
 
             <button
               type="button"
               style={ui.button}
-              onClick={() =>
-                setLayerMeta({
-                  videoStart: 0,
-                  videoSpeed: 1,
-                  videoPaused: false,
-                  videoLoop: true
-                })
-              }
+              onClick={() => setLayerMeta({ videoLoop: !videoLoop })}
             >
-              Reset video
+              Loop: {videoLoop ? "ON" : "OFF"}
             </button>
           </div>
-        </div>
+        </>
       )}
 
-      <div>
-        <div style={ui.label}>Z-index</div>
-        <input
-          style={ui.input}
-          type="number"
-          value={zIndex}
-          onChange={(e) => setZIndex(parseInt(e.target.value || "0", 10))}
-        />
-      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          type="button"
+          style={visible ? ui.buttonPrimary : ui.button}
+          onClick={() => setVisible(!visible)}
+        >
+          Visible: {visible ? "ON" : "OFF"}
+        </button>
 
-      <div>
-        <div style={ui.label}>Editor mode</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            style={mode === "draw" ? ui.buttonPrimary : ui.button}
-            onClick={() => setMode("draw")}
-            type="button"
-          >
-            Draw
-          </button>
-
-          <button
-            style={mode === "edit" ? ui.buttonPrimary : ui.button}
-            onClick={() => setMode("edit")}
-            type="button"
-          >
-            Edit
-          </button>
-        </div>
-      </div>
-
-      <div>
-        <div style={ui.label}>Opacity: {opacity.toFixed(2)}</div>
-        <input
-          style={{ width: "100%" }}
-          type="range"
-          min="0.05"
-          max="1"
-          step="0.05"
-          value={opacity}
-          onChange={(e) => setOpacity(parseFloat(e.target.value))}
-        />
-      </div>
-
-      <div>
-        <div style={ui.label}>Helpers</div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <button
-            style={showGrid ? ui.buttonPrimary : ui.button}
-            onClick={() => setShowGrid(!showGrid)}
-            type="button"
-          >
-            Test Grid: {showGrid ? "ON" : "OFF"}
-          </button>
-
-          <button
-            style={showPinkBackground ? ui.buttonPrimary : ui.button}
-            onClick={() => setShowPinkBackground(!showPinkBackground)}
-            type="button"
-          >
-            Pink BG: {showPinkBackground ? "ON" : "OFF"}
-          </button>
-        </div>
-      </div>
-
-      <div>
-        <div style={ui.label}>Layer state</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            style={visible ? ui.buttonPrimary : ui.button}
-            onClick={() => setVisible(!visible)}
-          >
-            Visible: {visible ? "ON" : "OFF"}
-          </button>
-
-          <button
-            type="button"
-            style={locked ? ui.buttonPrimary : ui.button}
-            onClick={() => setLocked(!locked)}
-          >
-            Locked: {locked ? "ON" : "OFF"}
-          </button>
-        </div>
+        <button
+          type="button"
+          style={locked ? ui.buttonPrimary : ui.button}
+          onClick={() => setLocked(!locked)}
+        >
+          Locked: {locked ? "ON" : "OFF"}
+        </button>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -512,19 +431,11 @@ export default function Toolbar({
           Update
         </button>
 
-        <button
-          style={ui.button}
-          onClick={onExportJson}
-          type="button"
-        >
+        <button style={ui.button} onClick={onExportJson} type="button">
           Export JSON
         </button>
 
-        <button
-          style={ui.buttonDanger}
-          onClick={onReset}
-          type="button"
-        >
+        <button style={ui.buttonDanger} onClick={onReset} type="button">
           Reset
         </button>
       </div>

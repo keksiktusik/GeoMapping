@@ -23,7 +23,7 @@ const WALL_W = 800;
 const WALL_H = 500;
 const STORAGE_OUTPUT = "mapping_output_state_v1";
 const SCENE_PRESETS_KEY = "mapping_scene_presets_v1";
-const DEFAULT_VIDEO_PATH = "/videos/fasada.mp4";
+const DEFAULT_VIDEO_PATH = "/videos/pociag.mp4";
 
 const MODEL_CONFIG = {
   mickiewicz: {
@@ -639,56 +639,89 @@ export default function ModelPage() {
     }));
   };
 
-  const patchMaskLocal = async (id, patch) => {
-    const current = masks.find((m) => m.id === id);
-    if (!current) return null;
+   const patchMaskLocal = async (id, patch) => {
+  const current = masks.find((m) => m.id === id);
+  if (!current) return null;
 
-    const merged = { ...current, ...patch };
+  const merged = { ...current, ...patch };
 
-    try {
-      const updated = await apiUpdateMask(id, {
-        name: merged.name,
-        type: merged.type,
-        operation: merged.operation,
-        zIndex: merged.zIndex,
-        visible: merged.visible,
-        locked: merged.locked,
-        layerName: merged.layerName,
-        textureType: merged.textureType,
-        textureValue: merged.textureValue,
-        opacity: merged.opacity,
-        points: (merged.points || []).map((p) => ({
-          x: Math.round(p.x),
-          y: Math.round(p.y)
-        })),
-        localWarp: maskWarps[id] || merged.localWarp || null
-      });
+  try {
+    const updatedRaw = await apiUpdateMask(id, {
+      name: merged.name,
+      type: merged.type,
+      operation: merged.operation,
+      zIndex: merged.zIndex,
+      visible: merged.visible,
+      locked: merged.locked,
+      layerName: merged.layerName,
+      textureType: merged.textureType,
+      textureValue: merged.textureValue,
+      opacity: merged.opacity,
+      points: (merged.points || []).map((p) => ({
+        x: Math.round(p.x),
+        y: Math.round(p.y)
+      })),
+      localWarp: maskWarps[id] || merged.localWarp || null
+    });
 
-      setMasks((prev) =>
-        sortMasksByZIndex(
-          prev.map((m) =>
-            m.id === id
-              ? {
-                  ...updated,
-                  visible: updated.visible !== false,
-                  locked: Boolean(updated.locked)
-                }
-              : m
-          )
-        )
+    const updated = {
+      ...updatedRaw,
+      visible: updatedRaw.visible !== false,
+      locked: Boolean(updatedRaw.locked),
+      zIndex:
+        typeof updatedRaw.zIndex === "number"
+          ? updatedRaw.zIndex
+          : Number(updatedRaw.zIndex || 0)
+    };
+
+    setMasks((prev) =>
+      sortMasksByZIndex(
+        prev.map((m) => (m.id === id ? updated : m))
+      )
+    );
+
+    setMaskWarps((prev) => ({
+      ...prev,
+      [id]: ensureMeshWarp(
+        updated.localWarp || maskWarps[id] || merged.localWarp,
+        WALL_W,
+        WALL_H,
+        4,
+        4
+      )
+    }));
+
+    if (selectedMaskId === id) {
+      setMaskName(updated.name || "");
+      setMaskType(updated.type || "window");
+      setOperation(updated.operation || "add");
+      setZIndex(typeof updated.zIndex === "number" ? updated.zIndex : 0);
+      setVisible(updated.visible !== false);
+      setLocked(Boolean(updated.locked));
+      setLayerName(updated.layerName || "default");
+
+      const nextTextureType = updated.textureType || "color";
+      const nextTextureValue = normalizeTextureValue(
+        nextTextureType,
+        updated.textureValue
       );
 
-      if (selectedMaskId === id) {
-        handleSelectMask(id);
-      }
+      setTextureType(nextTextureType);
+      setTextureValue(nextTextureValue);
 
-      return updated;
-    } catch (e) {
-      console.error(e);
-      alert("Nie udało się wykonać akcji na masce.");
-      return null;
+      setPoints(Array.isArray(updated.points) ? updated.points : []);
+      setOpacity(typeof updated.opacity === "number" ? updated.opacity : 0.35);
+      setIsClosed(true);
+      setMode("edit");
     }
-  };
+
+    return updated;
+  } catch (e) {
+    console.error(e);
+    alert("Nie udało się wykonać akcji na masce.");
+    return null;
+  }
+};
 
   const toggleMaskVisible = async (id) => {
     const mask = masks.find((m) => m.id === id);
@@ -796,7 +829,11 @@ export default function ModelPage() {
     setSelectedModelKey(preset.selectedModelKey || "mickiewicz");
     setRenderMode(preset.renderMode || "glb");
     setOutputSurfaceMode(preset.outputSurfaceMode || "lightGlb");
-    setOutputModelUrl(preset.outputModelUrl || selectedModelUrl);
+    setOutputModelUrl(
+  preset.outputModelUrl ||
+    MODEL_CONFIG[preset.selectedModelKey || "mickiewicz"]?.url ||
+    MODEL_CONFIG.mickiewicz.url
+);
     setProjector(preset.projector || projector);
     setWarp(ensureMeshWarp(preset.warp, WALL_W, WALL_H, 5, 5));
 
@@ -982,53 +1019,67 @@ export default function ModelPage() {
       />
 
       <ProjectionTexture
-        wallW={WALL_W}
-        wallH={WALL_H}
-        showGrid={showGrid}
-        showPinkBackground={showPinkBackground}
-        masks={masksWithLocalWarp}
-        activeDraft={activeDraft}
-        imageUrl="/projection.jpg"
-        onTexture={setProjectionTexture}
-      />
+  wallW={WALL_W}
+  wallH={WALL_H}
+  showGrid={showGrid}
+  showPinkBackground={showPinkBackground}
+  masks={masksWithLocalWarp}
+  activeDraft={activeDraft}
+  onTexture={setProjectionTexture}
+/>
 
       <div style={ui.shell}>
         <div style={ui.sidebar}>
           <SidebarPanel title="Mask editor">
-            <Toolbar
-              mode={mode}
-              setMode={setMode}
-              showGrid={showGrid}
-              setShowGrid={setShowGrid}
-              showPinkBackground={showPinkBackground}
-              setShowPinkBackground={setShowPinkBackground}
-              opacity={opacity}
-              setOpacity={setOpacity}
-              maskName={maskName}
-              setMaskName={setMaskName}
-              maskType={maskType}
-              setMaskType={setMaskType}
-              operation={operation}
-              setOperation={setOperation}
-              zIndex={zIndex}
-              setZIndex={setZIndex}
-              visible={visible}
-              setVisible={setVisible}
-              locked={locked}
-              setLocked={setLocked}
-              layerName={layerName}
-              setLayerName={setLayerName}
-              textureType={textureType}
-              setTextureType={setTextureType}
-              textureValue={textureValue}
-              setTextureValue={setTextureValue}
-              canSaveNew={canSaveNew}
-              canUpdate={canUpdate}
-              onSaveNew={saveNew}
-              onUpdate={updateSelected}
-              onReset={resetDraft}
-              onExportJson={exportJson}
-            />
+           <Toolbar
+  mode={mode}
+  setMode={setMode}
+  showGrid={showGrid}
+  setShowGrid={setShowGrid}
+  showPinkBackground={showPinkBackground}
+  setShowPinkBackground={setShowPinkBackground}
+  opacity={opacity}
+  setOpacity={setOpacity}
+  maskName={maskName}
+  setMaskName={setMaskName}
+  maskType={maskType}
+  setMaskType={setMaskType}
+  operation={operation}
+  setOperation={setOperation}
+  zIndex={zIndex}
+  setZIndex={setZIndex}
+  selectedMaskId={selectedMaskId}
+  onDepthPreview={(nextDepth) => {
+    if (selectedMaskId === null) return;
+    setMasks((prev) =>
+      sortMasksByZIndex(
+        prev.map((m) =>
+          m.id === selectedMaskId ? { ...m, zIndex: nextDepth } : m
+        )
+      )
+    );
+  }}
+  onDepthCommit={async (nextDepth) => {
+    if (selectedMaskId === null) return;
+    await patchMaskLocal(selectedMaskId, { zIndex: nextDepth });
+  }}
+  visible={visible}
+  setVisible={setVisible}
+  locked={locked}
+  setLocked={setLocked}
+  layerName={layerName}
+  setLayerName={setLayerName}
+  textureType={textureType}
+  setTextureType={setTextureType}
+  textureValue={textureValue}
+  setTextureValue={setTextureValue}
+  canSaveNew={canSaveNew}
+  canUpdate={canUpdate}
+  onSaveNew={saveNew}
+  onUpdate={updateSelected}
+  onReset={resetDraft}
+  onExportJson={exportJson}
+/>
 
             <div
               style={{
@@ -1079,20 +1130,100 @@ export default function ModelPage() {
 
           <SidebarPanel title="Saved masks">
             <MaskList
-              masks={masks}
-              selectedMaskId={selectedMaskId}
-              onSelect={handleSelectMask}
-              onDelete={deleteMask}
-              onToggleVisible={toggleMaskVisible}
-              onToggleLocked={toggleMaskLocked}
-              onMoveUp={(id) => moveMaskBy(id, 1)}
-              onMoveDown={(id) => moveMaskBy(id, -1)}
-              onDuplicate={(id) => {
-                handleSelectMask(id);
-                setTimeout(() => duplicateSelected(), 0);
-              }}
-              onSolo={soloMask}
-            />
+  masks={masks}
+  selectedMaskId={selectedMaskId}
+  onSelect={handleSelectMask}
+  onDelete={deleteMask}
+  onToggleVisible={toggleMaskVisible}
+  onToggleLocked={toggleMaskLocked}
+  onMoveUp={(id) => moveMaskBy(id, 1)}
+  onMoveDown={(id) => moveMaskBy(id, -1)}
+  onDepthChange={async (id, nextDepth) => {
+    setMasks((prev) =>
+      sortMasksByZIndex(
+        prev.map((m) =>
+          m.id === id ? { ...m, zIndex: nextDepth } : m
+        )
+      )
+    );
+
+    if (selectedMaskId === id) {
+      setZIndex(nextDepth);
+    }
+
+    await patchMaskLocal(id, { zIndex: nextDepth });
+  }}
+  onDuplicate={async (id) => {
+    const mask = masks.find((m) => m.id === id);
+    if (!mask) return;
+
+    const nextTextureType = mask.textureType || "color";
+    const nextTextureValue = normalizeTextureValue(
+      nextTextureType,
+      mask.textureValue
+    );
+
+    const dx = 24;
+    const dy = 18;
+    const duplicatedPoints = offsetPoints(
+      Array.isArray(mask.points) ? mask.points : [],
+      dx,
+      dy,
+      WALL_W,
+      WALL_H
+    );
+    const duplicatedWarp = offsetWarp(
+      maskWarps[id] || mask.localWarp,
+      dx,
+      dy,
+      WALL_W,
+      WALL_H,
+      4,
+      4
+    );
+
+    const payload = {
+      name: `${(mask.name || "Mask").trim()} copy`,
+      type: mask.type || "window",
+      operation: mask.operation || "add",
+      zIndex: Number(mask.zIndex || 0) + 1,
+      visible: mask.visible !== false,
+      locked: Boolean(mask.locked),
+      layerName: mask.layerName || "default",
+      textureType: nextTextureType,
+      textureValue: nextTextureValue,
+      opacity: typeof mask.opacity === "number" ? mask.opacity : 0.35,
+      points: duplicatedPoints.map((p) => ({
+        x: Math.round(p.x),
+        y: Math.round(p.y)
+      })),
+      localWarp: duplicatedWarp
+    };
+
+    try {
+      const created = await createMask(MODEL_ID, payload);
+
+      setMasks((prev) =>
+        sortMasksByZIndex([...prev, { ...created, visible: created.visible !== false }])
+      );
+
+      setMaskWarps((prev) => ({
+        ...prev,
+        [created.id]: ensureMeshWarp(
+          created.localWarp || duplicatedWarp,
+          WALL_W,
+          WALL_H,
+          4,
+          4
+        )
+      }));
+    } catch (e) {
+      console.error(e);
+      alert("Nie udało się zduplikować maski.");
+    }
+  }}
+  onSolo={soloMask}
+/>
           </SidebarPanel>
         </div>
 
@@ -1138,19 +1269,21 @@ export default function ModelPage() {
               </button>
 
               <button
-                style={
-                  renderMode === "glb" && selectedModelKey === "dworzec"
-                    ? ui.buttonPrimary
-                    : ui.button
-                }
-                onClick={() => {
-                  setRenderMode("glb");
-                  setSelectedModelKey("dworzec");
-                }}
-                type="button"
-              >
-                Dworzec Główny
-              </button>
+  style={
+    renderMode === "glb" && selectedModelKey === "dworzec"
+      ? ui.buttonPrimary
+      : ui.button
+  }
+  onClick={() => {
+    if (!MODEL_CONFIG.dworzec.enabled) return;
+    setRenderMode("glb");
+    setSelectedModelKey("dworzec");
+  }}
+  type="button"
+  disabled={!MODEL_CONFIG.dworzec.enabled}
+>
+  Dworzec Główny
+</button>
             </div>
 
             {renderMode === "plane" || selectedModelEnabled ? (
