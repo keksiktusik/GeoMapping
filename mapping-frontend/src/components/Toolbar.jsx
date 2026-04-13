@@ -29,6 +29,7 @@ function parseLayerMeta(layerName = "") {
   const videoSpeedMatch = text.match(/\[video-speed:([^\]]+)\]/i);
   const videoPausedMatch = text.match(/\[video-paused:([^\]]+)\]/i);
   const videoLoopMatch = text.match(/\[video-loop:([^\]]+)\]/i);
+  const cutoutMatch = text.match(/\[cutout:([^\]]+)\]/i);
 
   return {
     baseName: text
@@ -38,6 +39,7 @@ function parseLayerMeta(layerName = "") {
       .replace(/\[video-speed:[^\]]+\]/gi, "")
       .replace(/\[video-paused:[^\]]+\]/gi, "")
       .replace(/\[video-loop:[^\]]+\]/gi, "")
+      .replace(/\[cutout:[^\]]+\]/gi, "")
       .trim(),
     blend: (blendMatch?.[1] || "source-over").toLowerCase(),
     feather: Math.max(0, Number(featherMatch?.[1] || 0)),
@@ -48,6 +50,9 @@ function parseLayerMeta(layerName = "") {
     ),
     videoLoop: !["0", "false", "no", "off"].includes(
       String(videoLoopMatch?.[1] || "1").toLowerCase()
+    ),
+    cutout: ["1", "true", "yes", "on"].includes(
+      String(cutoutMatch?.[1] || "0").toLowerCase()
     )
   };
 }
@@ -59,7 +64,8 @@ function buildLayerName(
   videoStart,
   videoSpeed,
   videoPaused,
-  videoLoop
+  videoLoop,
+  cutout
 ) {
   const parts = [];
   const trimmedBase = String(baseName || "").trim();
@@ -88,6 +94,10 @@ function buildLayerName(
 
   if (videoLoop === false) {
     parts.push("[video-loop:false]");
+  }
+
+  if (cutout) {
+    parts.push("[cutout:true]");
   }
 
   return parts.join(" ").trim() || "default";
@@ -138,7 +148,9 @@ export default function Toolbar({
   const videoSpeed = meta.videoSpeed || 1;
   const videoPaused = meta.videoPaused || false;
   const videoLoop = meta.videoLoop !== false;
+  const cutout = meta.cutout === true;
   const hasSelectedMask = selectedMaskId !== null && selectedMaskId !== undefined;
+  const isIgnoreZone = maskType === "ignore-zone";
 
   const [depthDraft, setDepthDraft] = useState(() => clampDepth(zIndex));
 
@@ -160,7 +172,8 @@ export default function Toolbar({
         next.videoStart ?? videoStart,
         next.videoSpeed ?? videoSpeed,
         next.videoPaused ?? videoPaused,
-        next.videoLoop ?? videoLoop
+        next.videoLoop ?? videoLoop,
+        next.cutout ?? cutout
       )
     );
   };
@@ -192,42 +205,63 @@ export default function Toolbar({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div>
-        <div style={ui.label}>Mask name</div>
+        <div style={ui.label}>Nazwa maski</div>
         <input
           style={ui.input}
           value={maskName}
           onChange={(e) => setMaskName(e.target.value)}
-          placeholder="np. Left Window"
+          placeholder="np. Lewe okno"
         />
       </div>
 
       <div>
-        <div style={ui.label}>Mask type</div>
+        <div style={ui.label}>Typ maski</div>
         <select
           style={ui.input}
           value={maskType}
           onChange={(e) => setMaskType(e.target.value)}
         >
-          <option value="window">window</option>
-          <option value="door">door</option>
-          <option value="balcony">balcony</option>
-          <option value="ignore-zone">ignore-zone</option>
-          <option value="projection-zone">projection-zone</option>
+          <option value="window">okno</option>
+          <option value="door">drzwi</option>
+          <option value="balcony">balkon</option>
+          <option value="ignore-zone">strefa wycięcia</option>
+          <option value="projection-zone">strefa projekcji</option>
         </select>
       </div>
 
       <div>
-        <div style={ui.label}>Warstwa / operacja</div>
+        <div style={ui.label}>Operacja warstwy</div>
         <select
           style={ui.input}
-          value={operation}
+          value={isIgnoreZone ? "subtract" : operation}
           onChange={(e) => setOperation(e.target.value)}
+          disabled={isIgnoreZone}
         >
-          <option value="add">add</option>
-          <option value="subtract">subtract</option>
-          <option value="intersect">intersect</option>
+          <option value="add">dodaj</option>
+          <option value="subtract">odejmij</option>
+          <option value="intersect">część wspólna</option>
         </select>
+        {isIgnoreZone && (
+          <div style={ui.small}>
+            Dla strefy wycięcia operacja jest zawsze ustawiona na „odejmij”.
+          </div>
+        )}
       </div>
+
+      {!isIgnoreZone && (
+        <div>
+          <button
+            type="button"
+            style={cutout ? ui.buttonPrimary : ui.button}
+            onClick={() => setLayerMeta({ cutout: !cutout })}
+          >
+            Wycinaj tło pod maską: {cutout ? "WŁ." : "WYŁ."}
+          </button>
+          <div style={ui.small}>
+            Gdy włączone, maska najpierw wytnie tło pod sobą, a potem narysuje własną zawartość.
+          </div>
+        </div>
+      )}
 
       <div>
         <div style={ui.label}>
@@ -255,7 +289,7 @@ export default function Toolbar({
       </div>
 
       <div>
-        <div style={ui.label}>Opacity</div>
+        <div style={ui.label}>Przezroczystość</div>
         <input
           type="range"
           min="0"
@@ -269,7 +303,7 @@ export default function Toolbar({
       </div>
 
       <div>
-        <div style={ui.label}>Layer name</div>
+        <div style={ui.label}>Nazwa warstwy</div>
         <input
           style={ui.input}
           value={baseLayerName}
@@ -279,13 +313,13 @@ export default function Toolbar({
       </div>
 
       <div>
-        <div style={ui.label}>Blend mode</div>
+        <div style={ui.label}>Tryb mieszania</div>
         <select
           style={ui.input}
           value={blend}
           onChange={(e) => setLayerMeta({ blend: e.target.value })}
         >
-          <option value="source-over">normal</option>
+          <option value="source-over">normalny</option>
           <option value="multiply">multiply</option>
           <option value="screen">screen</option>
           <option value="overlay">overlay</option>
@@ -297,7 +331,7 @@ export default function Toolbar({
       </div>
 
       <div>
-        <div style={ui.label}>Feather</div>
+        <div style={ui.label}>Feather / rozmycie</div>
         <input
           type="range"
           min="0"
@@ -311,24 +345,31 @@ export default function Toolbar({
       </div>
 
       <div>
-        <div style={ui.label}>Texture type</div>
+        <div style={ui.label}>Typ tekstury</div>
         <select
           style={ui.input}
           value={textureType}
           onChange={handleTextureTypeChange}
+          disabled={isIgnoreZone}
         >
-          <option value="color">color</option>
-          <option value="image">image</option>
-          <option value="video">video</option>
+          <option value="color">kolor</option>
+          <option value="image">obraz</option>
+          <option value="video">wideo</option>
         </select>
+        {isIgnoreZone && (
+          <div style={ui.small}>
+            Dla strefy wycięcia tekstura nie ma znaczenia. Liczy się sam kształt.
+          </div>
+        )}
       </div>
 
       <div>
-        <div style={ui.label}>Texture value</div>
+        <div style={ui.label}>Wartość tekstury</div>
         <input
           style={ui.input}
           value={textureValue}
           onChange={(e) => setTextureValue(e.target.value)}
+          disabled={isIgnoreZone}
           placeholder={
             textureType === "color"
               ? "#ffffff"
@@ -338,16 +379,21 @@ export default function Toolbar({
           }
         />
         <div style={{ marginTop: 8 }}>
-          <button type="button" style={ui.button} onClick={applyDefaultAssetPath}>
+          <button
+            type="button"
+            style={ui.button}
+            onClick={applyDefaultAssetPath}
+            disabled={isIgnoreZone}
+          >
             Ustaw domyślną ścieżkę
           </button>
         </div>
       </div>
 
-      {textureType === "video" && (
+      {textureType === "video" && !isIgnoreZone && (
         <>
           <div>
-            <div style={ui.label}>Video start</div>
+            <div style={ui.label}>Start wideo</div>
             <input
               type="number"
               min="0"
@@ -361,7 +407,7 @@ export default function Toolbar({
           </div>
 
           <div>
-            <div style={ui.label}>Video speed</div>
+            <div style={ui.label}>Prędkość wideo</div>
             <input
               type="number"
               min="0.1"
@@ -380,7 +426,7 @@ export default function Toolbar({
               style={ui.button}
               onClick={() => setLayerMeta({ videoPaused: !videoPaused })}
             >
-              {videoPaused ? "Resume video" : "Pause video"}
+              {videoPaused ? "Wznów wideo" : "Pauza wideo"}
             </button>
 
             <button
@@ -388,7 +434,7 @@ export default function Toolbar({
               style={ui.button}
               onClick={() => setLayerMeta({ videoLoop: !videoLoop })}
             >
-              Loop: {videoLoop ? "ON" : "OFF"}
+              Pętla: {videoLoop ? "WŁ." : "WYŁ."}
             </button>
           </div>
         </>
@@ -400,7 +446,7 @@ export default function Toolbar({
           style={visible ? ui.buttonPrimary : ui.button}
           onClick={() => setVisible(!visible)}
         >
-          Visible: {visible ? "ON" : "OFF"}
+          Widoczność: {visible ? "WŁ." : "WYŁ."}
         </button>
 
         <button
@@ -408,7 +454,7 @@ export default function Toolbar({
           style={locked ? ui.buttonPrimary : ui.button}
           onClick={() => setLocked(!locked)}
         >
-          Locked: {locked ? "ON" : "OFF"}
+          Blokada: {locked ? "WŁ." : "WYŁ."}
         </button>
       </div>
 
@@ -419,7 +465,7 @@ export default function Toolbar({
           disabled={!canSaveNew}
           type="button"
         >
-          Save new
+          Zapisz nową
         </button>
 
         <button
@@ -428,11 +474,11 @@ export default function Toolbar({
           disabled={!canUpdate}
           type="button"
         >
-          Update
+          Aktualizuj
         </button>
 
         <button style={ui.button} onClick={onExportJson} type="button">
-          Export JSON
+          Eksport JSON
         </button>
 
         <button style={ui.buttonDanger} onClick={onReset} type="button">

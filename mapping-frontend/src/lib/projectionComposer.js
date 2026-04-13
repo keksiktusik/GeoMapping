@@ -191,9 +191,6 @@ function getLoadedVideo(cacheKey, videoCache, settings) {
 
   const { video } = cached;
 
-  // ważne: nie opieramy się tylko na cached.status,
-  // bo w osobnym oknie / output status potrafi zostać na "loading",
-  // mimo że video ma już dane gotowe do rysowania
   if (video.readyState >= 2) {
     if (cached.status !== "playing") {
       cached.status = "loaded";
@@ -323,198 +320,227 @@ function ensureMeshWarp(warp, wallW, wallH) {
     Number(warp?.cols) >= 2 &&
     Number(warp?.rows) >= 2
   ) {
-    return warp;
+    return {
+      ...warp,
+      points: warp.points.map((p) => ({
+        x: Number(p?.x || 0),
+        y: Number(p?.y || 0),
+        pinned: Boolean(p?.pinned)
+      }))
+    };
   }
 
   return createMeshWarp(wallW, wallH, 4, 4);
 }
 
-function drawImageTriangle(ctx, image, srcTri, dstTri) {
-  const [s0, s1, s2] = srcTri;
-  const [d0, d1, d2] = dstTri;
-
-  const denom =
-    s0.x * (s1.y - s2.y) +
-    s1.x * (s2.y - s0.y) +
-    s2.x * (s0.y - s1.y);
-
-  if (Math.abs(denom) < 1e-6) return;
-
-  const a =
-    (d0.x * (s1.y - s2.y) +
-      d1.x * (s2.y - s0.y) +
-      d2.x * (s0.y - s1.y)) /
-    denom;
-
-  const b =
-    (d0.y * (s1.y - s2.y) +
-      d1.y * (s2.y - s0.y) +
-      d2.y * (s0.y - s1.y)) /
-    denom;
-
-  const c =
-    (d0.x * (s2.x - s1.x) +
-      d1.x * (s0.x - s2.x) +
-      d2.x * (s1.x - s0.x)) /
-    denom;
-
-  const d =
-    (d0.y * (s2.x - s1.x) +
-      d1.y * (s0.x - s2.x) +
-      d2.y * (s1.x - s0.x)) /
-    denom;
-
-  const e =
-    (d0.x * (s1.x * s2.y - s2.x * s1.y) +
-      d1.x * (s2.x * s0.y - s0.x * s2.y) +
-      d2.x * (s0.x * s1.y - s1.x * s0.y)) /
-    denom;
-
-  const f =
-    (d0.y * (s1.x * s2.y - s2.x * s1.y) +
-      d1.y * (s2.x * s0.y - s0.x * s2.y) +
-      d2.y * (s0.x * s1.y - s1.x * s0.y)) /
-    denom;
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(d0.x, d0.y);
-  ctx.lineTo(d1.x, d1.y);
-  ctx.lineTo(d2.x, d2.y);
-  ctx.closePath();
-  ctx.clip();
-
-  ctx.setTransform(a, b, c, d, e, f);
-  ctx.drawImage(image, 0, 0);
-
-  ctx.restore();
-}
-
 function applyMeshWarpToCanvas(sourceCanvas, warp, wallW, wallH) {
   const mesh = ensureMeshWarp(warp, wallW, wallH);
   const { cols, rows, points } = mesh;
-  const { canvas: outCanvas, ctx } = createBuffer(wallW, wallH);
 
-  const getPoint = (col, row) => points[row * cols + col];
+  const out = document.createElement("canvas");
+  out.width = wallW;
+  out.height = wallH;
+  const outCtx = out.getContext("2d");
+
+  const sw = sourceCanvas.width;
+  const sh = sourceCanvas.height;
+
+  const srcStepX = sw / (cols - 1);
+  const srcStepY = sh / (rows - 1);
 
   for (let row = 0; row < rows - 1; row += 1) {
     for (let col = 0; col < cols - 1; col += 1) {
-      const sx0 = (col / (cols - 1)) * wallW;
-      const sy0 = (row / (rows - 1)) * wallH;
-      const sx1 = ((col + 1) / (cols - 1)) * wallW;
-      const sy1 = sy0;
-      const sx2 = sx0;
-      const sy2 = ((row + 1) / (rows - 1)) * wallH;
-      const sx3 = sx1;
-      const sy3 = sy2;
+      const p00 = points[row * cols + col];
+      const p10 = points[row * cols + col + 1];
+      const p01 = points[(row + 1) * cols + col];
+      const p11 = points[(row + 1) * cols + col + 1];
 
-      const p00 = getPoint(col, row);
-      const p10 = getPoint(col + 1, row);
-      const p01 = getPoint(col, row + 1);
-      const p11 = getPoint(col + 1, row + 1);
+      const sx = col * srcStepX;
+      const sy = row * srcStepY;
 
-      drawImageTriangle(
-        ctx,
-        sourceCanvas,
-        [
-          { x: sx0, y: sy0 },
-          { x: sx1, y: sy1 },
-          { x: sx2, y: sy2 }
-        ],
-        [
-          { x: p00.x, y: p00.y },
-          { x: p10.x, y: p10.y },
-          { x: p01.x, y: p01.y }
-        ]
-      );
+      const quad = [
+        { x: p00.x, y: p00.y, u: 0, v: 0 },
+        { x: p10.x, y: p10.y, u: 1, v: 0 },
+        { x: p11.x, y: p11.y, u: 1, v: 1 },
+        { x: p01.x, y: p01.y, u: 0, v: 1 }
+      ];
 
-      drawImageTriangle(
-        ctx,
-        sourceCanvas,
-        [
-          { x: sx2, y: sy2 },
-          { x: sx1, y: sy1 },
-          { x: sx3, y: sy3 }
-        ],
-        [
-          { x: p01.x, y: p01.y },
-          { x: p10.x, y: p10.y },
-          { x: p11.x, y: p11.y }
-        ]
-      );
+      const triangles = [
+        [quad[0], quad[1], quad[2]],
+        [quad[0], quad[2], quad[3]]
+      ];
+
+      for (const tri of triangles) {
+        outCtx.save();
+        outCtx.beginPath();
+        outCtx.moveTo(tri[0].x, tri[0].y);
+        outCtx.lineTo(tri[1].x, tri[1].y);
+        outCtx.lineTo(tri[2].x, tri[2].y);
+        outCtx.closePath();
+        outCtx.clip();
+
+        const denom =
+          tri[0].u * (tri[1].v - tri[2].v) +
+          tri[1].u * (tri[2].v - tri[0].v) +
+          tri[2].u * (tri[0].v - tri[1].v);
+
+        if (Math.abs(denom) > 1e-6) {
+          const a =
+            (tri[0].x * (tri[1].v - tri[2].v) +
+              tri[1].x * (tri[2].v - tri[0].v) +
+              tri[2].x * (tri[0].v - tri[1].v)) /
+            denom;
+          const b =
+            (tri[0].x * (tri[2].u - tri[1].u) +
+              tri[1].x * (tri[0].u - tri[2].u) +
+              tri[2].x * (tri[1].u - tri[0].u)) /
+            denom;
+          const c =
+            (tri[0].x * (tri[1].u * tri[2].v - tri[2].u * tri[1].v) +
+              tri[1].x * (tri[2].u * tri[0].v - tri[0].u * tri[2].v) +
+              tri[2].x * (tri[0].u * tri[1].v - tri[1].u * tri[0].v)) /
+            denom;
+
+          const d =
+            (tri[0].y * (tri[1].v - tri[2].v) +
+              tri[1].y * (tri[2].v - tri[0].v) +
+              tri[2].y * (tri[0].v - tri[1].v)) /
+            denom;
+          const e =
+            (tri[0].y * (tri[2].u - tri[1].u) +
+              tri[1].y * (tri[0].u - tri[2].u) +
+              tri[2].y * (tri[1].u - tri[0].u)) /
+            denom;
+          const f =
+            (tri[0].y * (tri[1].u * tri[2].v - tri[2].u * tri[1].v) +
+              tri[1].y * (tri[2].u * tri[0].v - tri[0].u * tri[2].v) +
+              tri[2].y * (tri[0].u * tri[1].v - tri[1].u * tri[0].v)) /
+            denom;
+
+          outCtx.transform(a, d, b, e, c, f);
+          outCtx.drawImage(
+            sourceCanvas,
+            sx,
+            sy,
+            srcStepX,
+            srcStepY,
+            0,
+            0,
+            1,
+            1
+          );
+        }
+
+        outCtx.restore();
+      }
     }
   }
 
-  return outCanvas;
+  return out;
 }
 
-export function parseLayerDirectives(layerName = "") {
+function parseLayerDirectives(layerName = "") {
   const text = String(layerName || "");
 
-  const blendMatch = text.match(/\[blend:([a-z-]+)\]/i);
-  const featherMatch = text.match(/\[feather:(\d+)\]/i);
-  const videoStartMatch = text.match(/\[video-start:([^\]]+)\]/i);
-  const videoSpeedMatch = text.match(/\[video-speed:([^\]]+)\]/i);
-  const videoPausedMatch = text.match(/\[video-paused:([^\]]+)\]/i);
-  const videoLoopMatch = text.match(/\[video-loop:([^\]]+)\]/i);
+  const readNumber = (name, fallback) => {
+    const match = text.match(new RegExp(`\\[${name}:([^\\]]+)\\]`, "i"));
+    if (!match) return fallback;
+    const num = Number(match[1]);
+    return Number.isFinite(num) ? num : fallback;
+  };
 
-  const blend = (blendMatch?.[1] || "source-over").toLowerCase();
-  const feather = Math.max(0, Number(featherMatch?.[1] || 0));
-  const videoStart = Math.max(0, Number(videoStartMatch?.[1] || 0));
-  const videoSpeed = Math.max(0.1, Number(videoSpeedMatch?.[1] || 1) || 1);
-  const videoPaused = ["1", "true", "yes", "on"].includes(
-    String(videoPausedMatch?.[1] || "0").toLowerCase()
-  );
-  const videoLoop = !["0", "false", "no", "off"].includes(
-    String(videoLoopMatch?.[1] || "1").toLowerCase()
-  );
+  const readString = (name, fallback) => {
+    const match = text.match(new RegExp(`\\[${name}:([^\\]]+)\\]`, "i"));
+    return match ? String(match[1]).trim() : fallback;
+  };
 
-  const label = text
-    .replace(/\[blend:[^\]]+\]/gi, "")
-    .replace(/\[feather:[^\]]+\]/gi, "")
-    .replace(/\[video-start:[^\]]+\]/gi, "")
-    .replace(/\[video-speed:[^\]]+\]/gi, "")
-    .replace(/\[video-paused:[^\]]+\]/gi, "")
-    .replace(/\[video-loop:[^\]]+\]/gi, "")
-    .trim();
+  const readBoolFlag = (name, fallback) => {
+    const raw = readString(name, null);
+    if (raw === null) return fallback;
+    if (raw === "1" || raw.toLowerCase() === "true") return true;
+    if (raw === "0" || raw.toLowerCase() === "false") return false;
+    return fallback;
+  };
+
+  const baseName = text.replace(/\[[^\]]+\]/g, "").trim();
 
   return {
-    raw: text,
-    label,
-    blend,
-    feather,
-    videoStart,
-    videoSpeed,
-    videoPaused,
-    videoLoop
+    baseName,
+    blend: readString("blend", "source-over"),
+    feather: Math.max(0, readNumber("feather", 0)),
+    videoStart: Math.max(0, readNumber("video-start", 0)),
+    videoSpeed: Math.max(0.1, readNumber("video-speed", 1)),
+    videoPaused: readBoolFlag("video-paused", false),
+    videoLoop: readBoolFlag("video-loop", true),
+    cutout: readBoolFlag("cutout", false)
   };
 }
 
-function normalizeBlendMode(blend) {
-  switch (blend) {
-    case "multiply":
-    case "screen":
-    case "overlay":
-    case "lighten":
-    case "darken":
-    case "color-dodge":
-    case "color-burn":
-    case "hard-light":
-    case "soft-light":
-    case "difference":
-    case "exclusion":
-      return blend;
-    case "normal":
-    case "source-over":
-    default:
-      return "source-over";
+function normalizeBlendMode(mode) {
+  const allowed = new Set([
+    "source-over",
+    "multiply",
+    "screen",
+    "overlay",
+    "lighten",
+    "darken",
+    "color-dodge",
+    "color-burn",
+    "hard-light",
+    "soft-light",
+    "difference",
+    "exclusion"
+  ]);
+
+  return allowed.has(mode) ? mode : "source-over";
+}
+
+function isCutoutShape(shape) {
+  return shape?.type === "ignore-zone" || shape?.operation === "subtract";
+}
+
+function hasAutoCutout(shape) {
+  if (!shape) return false;
+  if (isCutoutShape(shape)) return false;
+  const directives = parseLayerDirectives(shape?.layerName);
+  return directives.cutout === true;
+}
+
+function renderCutoutShape(shape, wallW, wallH) {
+  const { canvas, ctx } = createBuffer(wallW, wallH);
+
+  if (!drawPolygonPath(ctx, shape?.points || [])) {
+    return canvas;
   }
+
+  const alpha = typeof shape.opacity === "number" ? shape.opacity : 1;
+  const directives = parseLayerDirectives(shape?.layerName);
+  const feather = directives.feather;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  if (feather > 0) {
+    ctx.filter = `blur(${feather}px)`;
+  }
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.restore();
+
+  return shape?.localWarp
+    ? applyMeshWarpToCanvas(canvas, shape.localWarp, wallW, wallH)
+    : canvas;
 }
 
 function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) {
+  if (isCutoutShape(shape)) {
+    return renderCutoutShape(shape, wallW, wallH);
+  }
+
   const { canvas, ctx } = createBuffer(wallW, wallH);
 
-  if (!drawPolygonPath(ctx, shape.points)) {
+  if (!drawPolygonPath(ctx, shape?.points || [])) {
     return canvas;
   }
 
@@ -598,17 +624,21 @@ function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) 
     : canvas;
 }
 
+function applyDestinationOut(compositeCtx, shapeCanvas) {
+  compositeCtx.save();
+  compositeCtx.globalCompositeOperation = "destination-out";
+  compositeCtx.drawImage(shapeCanvas, 0, 0);
+  compositeCtx.restore();
+}
+
 function applyShapeToComposite(compositeCanvas, shapeCanvas, shape, wallW, wallH) {
   const compositeCtx = compositeCanvas.getContext("2d");
   const operation = shape?.operation || "add";
   const directives = parseLayerDirectives(shape?.layerName);
   const blend = normalizeBlendMode(directives.blend);
 
-  if (operation === "subtract") {
-    compositeCtx.save();
-    compositeCtx.globalCompositeOperation = "destination-out";
-    compositeCtx.drawImage(shapeCanvas, 0, 0);
-    compositeCtx.restore();
+  if (isCutoutShape(shape)) {
+    applyDestinationOut(compositeCtx, shapeCanvas);
     return;
   }
 
@@ -622,6 +652,10 @@ function applyShapeToComposite(compositeCanvas, shapeCanvas, shape, wallW, wallH
     compositeCtx.clearRect(0, 0, wallW, wallH);
     compositeCtx.drawImage(temp, 0, 0);
     return;
+  }
+
+  if (hasAutoCutout(shape)) {
+    applyDestinationOut(compositeCtx, shapeCanvas);
   }
 
   compositeCtx.save();
@@ -678,7 +712,10 @@ function buildCompositeTexture({
     .sort((a, b) => {
       const az = typeof a.zIndex === "number" ? a.zIndex : 0;
       const bz = typeof b.zIndex === "number" ? b.zIndex : 0;
-      return az - bz;
+
+      if (az !== bz) return az - bz;
+      if (isCutoutShape(a) === isCutoutShape(b)) return 0;
+      return isCutoutShape(a) ? 1 : -1;
     });
 
   for (const shape of orderedShapes) {

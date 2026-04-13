@@ -39,7 +39,7 @@ const MODEL_CONFIG = {
   dworzec: {
     label: "Dworzec Główny",
     url: "/models/fasada3.glb",
-    enabled: false
+    enabled: true
   }
 };
 
@@ -56,6 +56,11 @@ function normalizeTextureValue(type, value) {
   if (type === "image") return value || "/projection.jpg";
   if (type === "video") return value || DEFAULT_VIDEO_PATH;
   return value || "#ffffff";
+}
+
+function normalizeMaskOperation(type, operation) {
+  if (type === "ignore-zone") return "subtract";
+  return operation || "add";
 }
 
 function createMeshWarp(w, h, cols = 5, rows = 5) {
@@ -140,7 +145,8 @@ function normalizeIncomingMasks(list) {
     ...m,
     visible: m.visible !== false,
     locked: Boolean(m.locked),
-    zIndex: typeof m.zIndex === "number" ? m.zIndex : 0
+    zIndex: typeof m.zIndex === "number" ? m.zIndex : Number(m.zIndex || 0),
+    operation: normalizeMaskOperation(m.type, m.operation)
   }));
 }
 
@@ -255,7 +261,7 @@ export default function ModelPage() {
         setMaskWarps(nextWarps);
       } catch (e) {
         console.error(e);
-        alert("Nie udało się pobrać masek (sprawdź API / mock).");
+        alert("Nie udało się pobrać masek (sprawdź API / backend).");
       }
     })();
   }, []);
@@ -340,7 +346,7 @@ export default function ModelPage() {
       id: selectedMaskId ?? "__draft__",
       name: maskName,
       type: maskType,
-      operation,
+      operation: normalizeMaskOperation(maskType, operation),
       zIndex,
       visible,
       locked,
@@ -396,7 +402,7 @@ export default function ModelPage() {
       modelId: MODEL_ID,
       name: maskName.trim(),
       type: maskType,
-      operation,
+      operation: normalizeMaskOperation(maskType, operation),
       zIndex,
       visible,
       locked,
@@ -413,7 +419,7 @@ export default function ModelPage() {
     };
 
     console.log("MASK JSON:", payload);
-    alert("JSON maski poszedł do konsoli.");
+    alert("JSON maski został wypisany w konsoli.");
   };
 
   const saveNew = async () => {
@@ -424,7 +430,7 @@ export default function ModelPage() {
     const payload = {
       name: maskName.trim(),
       type: maskType,
-      operation,
+      operation: normalizeMaskOperation(maskType, operation),
       zIndex,
       visible,
       locked,
@@ -455,7 +461,7 @@ export default function ModelPage() {
       setMode("edit");
     } catch (e) {
       console.error(e);
-      alert("Nie udało się zapisać maski (sprawdź API / backend).");
+      alert("Nie udało się zapisać maski.");
     }
   };
 
@@ -473,7 +479,7 @@ export default function ModelPage() {
     const patch = {
       name: maskName.trim(),
       type: maskType,
-      operation,
+      operation: normalizeMaskOperation(maskType, operation),
       zIndex,
       visible,
       locked,
@@ -498,7 +504,8 @@ export default function ModelPage() {
               ? {
                   ...updated,
                   visible: updated.visible !== false,
-                  locked: Boolean(updated.locked)
+                  locked: Boolean(updated.locked),
+                  operation: normalizeMaskOperation(updated.type, updated.operation)
                 }
               : m
           )
@@ -510,10 +517,10 @@ export default function ModelPage() {
         [updated.id]: ensureMeshWarp(updated.localWarp || localWarp, WALL_W, WALL_H, 4, 4)
       }));
 
-      alert("Zaktualizowano maskę ✅");
+      alert("Zaktualizowano maskę.");
     } catch (e) {
       console.error(e);
-      alert("Nie udało się zaktualizować maski (sprawdź API / backend).");
+      alert("Nie udało się zaktualizować maski.");
     }
   };
 
@@ -535,9 +542,9 @@ export default function ModelPage() {
     );
 
     const payload = {
-      name: `${maskName.trim() || "Mask"} copy`,
+      name: `${maskName.trim() || "Maska"} kopia`,
       type: maskType,
-      operation,
+      operation: normalizeMaskOperation(maskType, operation),
       zIndex: Number(zIndex || 0) + 1,
       visible,
       locked,
@@ -579,7 +586,7 @@ export default function ModelPage() {
       setIsClosed(true);
       setMode("edit");
 
-      alert("Utworzono kopię maski ✅");
+      alert("Utworzono kopię maski.");
     } catch (e) {
       console.error(e);
       alert("Nie udało się zduplikować maski.");
@@ -602,7 +609,7 @@ export default function ModelPage() {
       }
     } catch (e) {
       console.error(e);
-      alert("Nie udało się usunąć maski (sprawdź API / backend).");
+      alert("Nie udało się usunąć maski.");
     }
   };
 
@@ -613,7 +620,7 @@ export default function ModelPage() {
     setSelectedMaskId(id);
     setMaskName(mask.name || "");
     setMaskType(mask.type || "window");
-    setOperation(mask.operation || "add");
+    setOperation(normalizeMaskOperation(mask.type, mask.operation));
     setZIndex(typeof mask.zIndex === "number" ? mask.zIndex : 0);
     setVisible(mask.visible !== false);
     setLocked(Boolean(mask.locked));
@@ -639,89 +646,95 @@ export default function ModelPage() {
     }));
   };
 
-   const patchMaskLocal = async (id, patch) => {
-  const current = masks.find((m) => m.id === id);
-  if (!current) return null;
+  const patchMaskLocal = async (id, patch) => {
+    const current = masks.find((m) => m.id === id);
+    if (!current) return null;
 
-  const merged = { ...current, ...patch };
-
-  try {
-    const updatedRaw = await apiUpdateMask(id, {
-      name: merged.name,
-      type: merged.type,
-      operation: merged.operation,
-      zIndex: merged.zIndex,
-      visible: merged.visible,
-      locked: merged.locked,
-      layerName: merged.layerName,
-      textureType: merged.textureType,
-      textureValue: merged.textureValue,
-      opacity: merged.opacity,
-      points: (merged.points || []).map((p) => ({
-        x: Math.round(p.x),
-        y: Math.round(p.y)
-      })),
-      localWarp: maskWarps[id] || merged.localWarp || null
-    });
-
-    const updated = {
-      ...updatedRaw,
-      visible: updatedRaw.visible !== false,
-      locked: Boolean(updatedRaw.locked),
-      zIndex:
-        typeof updatedRaw.zIndex === "number"
-          ? updatedRaw.zIndex
-          : Number(updatedRaw.zIndex || 0)
+    const merged = {
+      ...current,
+      ...patch,
+      operation: normalizeMaskOperation(
+        patch.type ?? current.type,
+        patch.operation ?? current.operation
+      )
     };
 
-    setMasks((prev) =>
-      sortMasksByZIndex(
-        prev.map((m) => (m.id === id ? updated : m))
-      )
-    );
+    try {
+      const updatedRaw = await apiUpdateMask(id, {
+        name: merged.name,
+        type: merged.type,
+        operation: merged.operation,
+        zIndex: merged.zIndex,
+        visible: merged.visible,
+        locked: merged.locked,
+        layerName: merged.layerName,
+        textureType: merged.textureType,
+        textureValue: merged.textureValue,
+        opacity: merged.opacity,
+        points: (merged.points || []).map((p) => ({
+          x: Math.round(p.x),
+          y: Math.round(p.y)
+        })),
+        localWarp: maskWarps[id] || merged.localWarp || null
+      });
 
-    setMaskWarps((prev) => ({
-      ...prev,
-      [id]: ensureMeshWarp(
-        updated.localWarp || maskWarps[id] || merged.localWarp,
-        WALL_W,
-        WALL_H,
-        4,
-        4
-      )
-    }));
+      const updated = {
+        ...updatedRaw,
+        visible: updatedRaw.visible !== false,
+        locked: Boolean(updatedRaw.locked),
+        zIndex:
+          typeof updatedRaw.zIndex === "number"
+            ? updatedRaw.zIndex
+            : Number(updatedRaw.zIndex || 0),
+        operation: normalizeMaskOperation(updatedRaw.type, updatedRaw.operation)
+      };
 
-    if (selectedMaskId === id) {
-      setMaskName(updated.name || "");
-      setMaskType(updated.type || "window");
-      setOperation(updated.operation || "add");
-      setZIndex(typeof updated.zIndex === "number" ? updated.zIndex : 0);
-      setVisible(updated.visible !== false);
-      setLocked(Boolean(updated.locked));
-      setLayerName(updated.layerName || "default");
-
-      const nextTextureType = updated.textureType || "color";
-      const nextTextureValue = normalizeTextureValue(
-        nextTextureType,
-        updated.textureValue
+      setMasks((prev) =>
+        sortMasksByZIndex(prev.map((m) => (m.id === id ? updated : m)))
       );
 
-      setTextureType(nextTextureType);
-      setTextureValue(nextTextureValue);
+      setMaskWarps((prev) => ({
+        ...prev,
+        [id]: ensureMeshWarp(
+          updated.localWarp || maskWarps[id] || merged.localWarp,
+          WALL_W,
+          WALL_H,
+          4,
+          4
+        )
+      }));
 
-      setPoints(Array.isArray(updated.points) ? updated.points : []);
-      setOpacity(typeof updated.opacity === "number" ? updated.opacity : 0.35);
-      setIsClosed(true);
-      setMode("edit");
+      if (selectedMaskId === id) {
+        setMaskName(updated.name || "");
+        setMaskType(updated.type || "window");
+        setOperation(normalizeMaskOperation(updated.type, updated.operation));
+        setZIndex(typeof updated.zIndex === "number" ? updated.zIndex : 0);
+        setVisible(updated.visible !== false);
+        setLocked(Boolean(updated.locked));
+        setLayerName(updated.layerName || "default");
+
+        const nextTextureType = updated.textureType || "color";
+        const nextTextureValue = normalizeTextureValue(
+          nextTextureType,
+          updated.textureValue
+        );
+
+        setTextureType(nextTextureType);
+        setTextureValue(nextTextureValue);
+
+        setPoints(Array.isArray(updated.points) ? updated.points : []);
+        setOpacity(typeof updated.opacity === "number" ? updated.opacity : 0.35);
+        setIsClosed(true);
+        setMode("edit");
+      }
+
+      return updated;
+    } catch (e) {
+      console.error(e);
+      alert("Nie udało się wykonać akcji na masce.");
+      return null;
     }
-
-    return updated;
-  } catch (e) {
-    console.error(e);
-    alert("Nie udało się wykonać akcji na masce.");
-    return null;
-  }
-};
+  };
 
   const toggleMaskVisible = async (id) => {
     const mask = masks.find((m) => m.id === id);
@@ -769,26 +782,6 @@ export default function ModelPage() {
     );
   };
 
-  const quickShowAll = async () => {
-    await Promise.all(masks.map((m) => patchMaskLocal(m.id, { visible: true })));
-  };
-
-  const quickHideAll = async () => {
-    await Promise.all(masks.map((m) => patchMaskLocal(m.id, { visible: false })));
-  };
-
-  const quickBlackout = async () => {
-    await quickHideAll();
-  };
-
-  const quickUnlockAll = async () => {
-    await Promise.all(masks.map((m) => patchMaskLocal(m.id, { locked: false })));
-  };
-
-  const quickResetGlobalWarp = () => {
-    setWarp(createMeshWarp(WALL_W, WALL_H, 5, 5));
-  };
-
   const saveScenePreset = () => {
     const name = sceneName.trim();
     if (!name) {
@@ -812,7 +805,7 @@ export default function ModelPage() {
         locked: Boolean(m.locked),
         zIndex: m.zIndex ?? 0,
         opacity: typeof m.opacity === "number" ? m.opacity : 1,
-        operation: m.operation || "add",
+        operation: normalizeMaskOperation(m.type, m.operation),
         textureType: m.textureType || "color",
         textureValue: m.textureValue || "#ffffff",
         layerName: m.layerName || "default"
@@ -830,10 +823,10 @@ export default function ModelPage() {
     setRenderMode(preset.renderMode || "glb");
     setOutputSurfaceMode(preset.outputSurfaceMode || "lightGlb");
     setOutputModelUrl(
-  preset.outputModelUrl ||
-    MODEL_CONFIG[preset.selectedModelKey || "mickiewicz"]?.url ||
-    MODEL_CONFIG.mickiewicz.url
-);
+      preset.outputModelUrl ||
+        MODEL_CONFIG[preset.selectedModelKey || "mickiewicz"]?.url ||
+        MODEL_CONFIG.mickiewicz.url
+    );
     setProjector(preset.projector || projector);
     setWarp(ensureMeshWarp(preset.warp, WALL_W, WALL_H, 5, 5));
 
@@ -846,7 +839,7 @@ export default function ModelPage() {
         locked: saved.locked,
         zIndex: saved.zIndex,
         opacity: saved.opacity,
-        operation: saved.operation,
+        operation: normalizeMaskOperation(current.type, saved.operation),
         textureType: saved.textureType,
         textureValue: saved.textureValue,
         layerName: saved.layerName
@@ -858,69 +851,9 @@ export default function ModelPage() {
     setScenePresets((prev) => prev.filter((s) => s.id !== id));
   };
 
-  const handleContextMenu = (e) => {
-    e.preventDefault();
-    resetDraft();
-  };
-
   useEffect(() => {
     setTextureValue((prev) => normalizeTextureValue(textureType, prev));
   }, [textureType]);
-
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if (!selectedMaskId) return;
-
-      if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) {
-        return;
-      }
-
-      if (e.key === "v" || e.key === "V") {
-        e.preventDefault();
-        toggleMaskVisible(selectedMaskId);
-      }
-
-      if (e.key === "l" || e.key === "L") {
-        e.preventDefault();
-        toggleMaskLocked(selectedMaskId);
-      }
-
-      if (e.key === "Delete") {
-        e.preventDefault();
-        deleteMask(selectedMaskId);
-      }
-
-      if ((e.key === "d" || e.key === "D") && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        duplicateSelected();
-      }
-
-      if (e.key === "]") {
-        e.preventDefault();
-        moveMaskBy(selectedMaskId, 1);
-      }
-
-      if (e.key === "[") {
-        e.preventDefault();
-        moveMaskBy(selectedMaskId, -1);
-      }
-
-      if (e.key === "s" || e.key === "S") {
-        e.preventDefault();
-        soloMask(selectedMaskId);
-      }
-
-      if (e.key === "b" || e.key === "B") {
-        e.preventDefault();
-        quickBlackout();
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [selectedMaskId, masks, points, opacity, maskWarps]);
 
   useEffect(() => {
     if (isOutput) return;
@@ -947,7 +880,7 @@ export default function ModelPage() {
             id: selectedMaskId ?? "__draft__",
             name: maskName,
             type: maskType,
-            operation,
+            operation: normalizeMaskOperation(maskType, operation),
             zIndex,
             visible,
             locked,
@@ -962,7 +895,7 @@ export default function ModelPage() {
         })
       );
     } catch {
-      // ignore
+      //
     }
   }, [
     isOutput,
@@ -1010,7 +943,7 @@ export default function ModelPage() {
   };
 
   return (
-    <div style={ui.page} onContextMenu={handleContextMenu}>
+    <div style={ui.page}>
       <TopBar
         renderMode={renderMode}
         masksCount={masks.length}
@@ -1019,67 +952,67 @@ export default function ModelPage() {
       />
 
       <ProjectionTexture
-  wallW={WALL_W}
-  wallH={WALL_H}
-  showGrid={showGrid}
-  showPinkBackground={showPinkBackground}
-  masks={masksWithLocalWarp}
-  activeDraft={activeDraft}
-  onTexture={setProjectionTexture}
-/>
+        wallW={WALL_W}
+        wallH={WALL_H}
+        showGrid={showGrid}
+        showPinkBackground={showPinkBackground}
+        masks={masksWithLocalWarp}
+        activeDraft={activeDraft}
+        onTexture={setProjectionTexture}
+      />
 
       <div style={ui.shell}>
         <div style={ui.sidebar}>
-          <SidebarPanel title="Mask editor">
-           <Toolbar
-  mode={mode}
-  setMode={setMode}
-  showGrid={showGrid}
-  setShowGrid={setShowGrid}
-  showPinkBackground={showPinkBackground}
-  setShowPinkBackground={setShowPinkBackground}
-  opacity={opacity}
-  setOpacity={setOpacity}
-  maskName={maskName}
-  setMaskName={setMaskName}
-  maskType={maskType}
-  setMaskType={setMaskType}
-  operation={operation}
-  setOperation={setOperation}
-  zIndex={zIndex}
-  setZIndex={setZIndex}
-  selectedMaskId={selectedMaskId}
-  onDepthPreview={(nextDepth) => {
-    if (selectedMaskId === null) return;
-    setMasks((prev) =>
-      sortMasksByZIndex(
-        prev.map((m) =>
-          m.id === selectedMaskId ? { ...m, zIndex: nextDepth } : m
-        )
-      )
-    );
-  }}
-  onDepthCommit={async (nextDepth) => {
-    if (selectedMaskId === null) return;
-    await patchMaskLocal(selectedMaskId, { zIndex: nextDepth });
-  }}
-  visible={visible}
-  setVisible={setVisible}
-  locked={locked}
-  setLocked={setLocked}
-  layerName={layerName}
-  setLayerName={setLayerName}
-  textureType={textureType}
-  setTextureType={setTextureType}
-  textureValue={textureValue}
-  setTextureValue={setTextureValue}
-  canSaveNew={canSaveNew}
-  canUpdate={canUpdate}
-  onSaveNew={saveNew}
-  onUpdate={updateSelected}
-  onReset={resetDraft}
-  onExportJson={exportJson}
-/>
+          <SidebarPanel title="Edytor maski">
+            <Toolbar
+              mode={mode}
+              setMode={setMode}
+              showGrid={showGrid}
+              setShowGrid={setShowGrid}
+              showPinkBackground={showPinkBackground}
+              setShowPinkBackground={setShowPinkBackground}
+              opacity={opacity}
+              setOpacity={setOpacity}
+              maskName={maskName}
+              setMaskName={setMaskName}
+              maskType={maskType}
+              setMaskType={setMaskType}
+              operation={operation}
+              setOperation={setOperation}
+              zIndex={zIndex}
+              setZIndex={setZIndex}
+              selectedMaskId={selectedMaskId}
+              onDepthPreview={(nextDepth) => {
+                if (selectedMaskId === null) return;
+                setMasks((prev) =>
+                  sortMasksByZIndex(
+                    prev.map((m) =>
+                      m.id === selectedMaskId ? { ...m, zIndex: nextDepth } : m
+                    )
+                  )
+                );
+              }}
+              onDepthCommit={async (nextDepth) => {
+                if (selectedMaskId === null) return;
+                await patchMaskLocal(selectedMaskId, { zIndex: nextDepth });
+              }}
+              visible={visible}
+              setVisible={setVisible}
+              locked={locked}
+              setLocked={setLocked}
+              layerName={layerName}
+              setLayerName={setLayerName}
+              textureType={textureType}
+              setTextureType={setTextureType}
+              textureValue={textureValue}
+              setTextureValue={setTextureValue}
+              canSaveNew={canSaveNew}
+              canUpdate={canUpdate}
+              onSaveNew={saveNew}
+              onUpdate={updateSelected}
+              onReset={resetDraft}
+              onExportJson={exportJson}
+            />
 
             <div
               style={{
@@ -1099,383 +1032,222 @@ export default function ModelPage() {
                     : { ...ui.button, opacity: 0.5, cursor: "not-allowed" }
                 }
               >
-                Duplicate selected mask
+                Duplikuj wybraną maskę
               </button>
             </div>
           </SidebarPanel>
 
-          <SidebarPanel title="Quick actions">
-            <div style={{ display: "grid", gap: 8 }}>
-              <button type="button" style={ui.button} onClick={quickShowAll}>
-                Show all
-              </button>
-              <button type="button" style={ui.button} onClick={quickHideAll}>
-                Hide all
-              </button>
-              <button type="button" style={ui.buttonDanger} onClick={quickBlackout}>
-                Blackout
-              </button>
-              <button type="button" style={ui.button} onClick={quickUnlockAll}>
-                Unlock all
-              </button>
-              <button type="button" style={ui.button} onClick={quickResetGlobalWarp}>
-                Reset global warp
-              </button>
-            </div>
-
-            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-              Skróty: V visible, L lock, S solo, [ ] z-index, Ctrl+D duplicate, B blackout, Delete usuń
-            </div>
-          </SidebarPanel>
-
-          <SidebarPanel title="Saved masks">
+          <SidebarPanel title="Zapisane maski">
             <MaskList
-  masks={masks}
-  selectedMaskId={selectedMaskId}
-  onSelect={handleSelectMask}
-  onDelete={deleteMask}
-  onToggleVisible={toggleMaskVisible}
-  onToggleLocked={toggleMaskLocked}
-  onMoveUp={(id) => moveMaskBy(id, 1)}
-  onMoveDown={(id) => moveMaskBy(id, -1)}
-  onDepthChange={async (id, nextDepth) => {
-    setMasks((prev) =>
-      sortMasksByZIndex(
-        prev.map((m) =>
-          m.id === id ? { ...m, zIndex: nextDepth } : m
-        )
-      )
-    );
+              masks={masks}
+              selectedMaskId={selectedMaskId}
+              onSelect={handleSelectMask}
+              onDelete={deleteMask}
+              onToggleVisible={toggleMaskVisible}
+              onToggleLocked={toggleMaskLocked}
+              onMoveUp={(id) => moveMaskBy(id, 1)}
+              onMoveDown={(id) => moveMaskBy(id, -1)}
+              onDepthChange={async (id, nextDepth) => {
+                setMasks((prev) =>
+                  sortMasksByZIndex(
+                    prev.map((m) =>
+                      m.id === id ? { ...m, zIndex: nextDepth } : m
+                    )
+                  )
+                );
 
-    if (selectedMaskId === id) {
-      setZIndex(nextDepth);
-    }
-
-    await patchMaskLocal(id, { zIndex: nextDepth });
-  }}
-  onDuplicate={async (id) => {
-    const mask = masks.find((m) => m.id === id);
-    if (!mask) return;
-
-    const nextTextureType = mask.textureType || "color";
-    const nextTextureValue = normalizeTextureValue(
-      nextTextureType,
-      mask.textureValue
-    );
-
-    const dx = 24;
-    const dy = 18;
-    const duplicatedPoints = offsetPoints(
-      Array.isArray(mask.points) ? mask.points : [],
-      dx,
-      dy,
-      WALL_W,
-      WALL_H
-    );
-    const duplicatedWarp = offsetWarp(
-      maskWarps[id] || mask.localWarp,
-      dx,
-      dy,
-      WALL_W,
-      WALL_H,
-      4,
-      4
-    );
-
-    const payload = {
-      name: `${(mask.name || "Mask").trim()} copy`,
-      type: mask.type || "window",
-      operation: mask.operation || "add",
-      zIndex: Number(mask.zIndex || 0) + 1,
-      visible: mask.visible !== false,
-      locked: Boolean(mask.locked),
-      layerName: mask.layerName || "default",
-      textureType: nextTextureType,
-      textureValue: nextTextureValue,
-      opacity: typeof mask.opacity === "number" ? mask.opacity : 0.35,
-      points: duplicatedPoints.map((p) => ({
-        x: Math.round(p.x),
-        y: Math.round(p.y)
-      })),
-      localWarp: duplicatedWarp
-    };
-
-    try {
-      const created = await createMask(MODEL_ID, payload);
-
-      setMasks((prev) =>
-        sortMasksByZIndex([...prev, { ...created, visible: created.visible !== false }])
-      );
-
-      setMaskWarps((prev) => ({
-        ...prev,
-        [created.id]: ensureMeshWarp(
-          created.localWarp || duplicatedWarp,
-          WALL_W,
-          WALL_H,
-          4,
-          4
-        )
-      }));
-    } catch (e) {
-      console.error(e);
-      alert("Nie udało się zduplikować maski.");
-    }
-  }}
-  onSolo={soloMask}
-/>
-          </SidebarPanel>
-        </div>
-
-        <div style={ui.center}>
-          <SidebarPanel title="3D preview">
-            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-              <button
-                style={renderMode === "plane" ? ui.buttonPrimary : ui.button}
-                onClick={() => setRenderMode("plane")}
-                type="button"
-              >
-                Plane
-              </button>
-
-              <button
-                style={
-                  renderMode === "glb" && selectedModelKey === "mickiewicz"
-                    ? ui.buttonPrimary
-                    : ui.button
+                if (selectedMaskId === id) {
+                  setZIndex(nextDepth);
                 }
-                onClick={() => {
-                  setRenderMode("glb");
-                  setSelectedModelKey("mickiewicz");
-                }}
-                type="button"
-              >
-                Szkoła im. Adama Mickiewicza
-              </button>
 
-              <button
-                style={
-                  renderMode === "glb" && selectedModelKey === "kolejowa"
-                    ? ui.buttonPrimary
-                    : ui.button
+                await patchMaskLocal(id, { zIndex: nextDepth });
+              }}
+              onDuplicate={async (id) => {
+                const mask = masks.find((m) => m.id === id);
+                if (!mask) return;
+
+                const nextTextureType = mask.textureType || "color";
+                const nextTextureValue = normalizeTextureValue(
+                  nextTextureType,
+                  mask.textureValue
+                );
+
+                const dx = 24;
+                const dy = 18;
+                const duplicatedPoints = offsetPoints(
+                  Array.isArray(mask.points) ? mask.points : [],
+                  dx,
+                  dy,
+                  WALL_W,
+                  WALL_H
+                );
+                const duplicatedWarp = offsetWarp(
+                  maskWarps[id] || mask.localWarp,
+                  dx,
+                  dy,
+                  WALL_W,
+                  WALL_H,
+                  4,
+                  4
+                );
+
+                const payload = {
+                  name: `${(mask.name || "Maska").trim()} kopia`,
+                  type: mask.type || "window",
+                  operation: normalizeMaskOperation(mask.type, mask.operation),
+                  zIndex: Number(mask.zIndex || 0) + 1,
+                  visible: mask.visible !== false,
+                  locked: Boolean(mask.locked),
+                  layerName: mask.layerName || "default",
+                  textureType: nextTextureType,
+                  textureValue: nextTextureValue,
+                  opacity: typeof mask.opacity === "number" ? mask.opacity : 0.35,
+                  points: duplicatedPoints.map((p) => ({
+                    x: Math.round(p.x),
+                    y: Math.round(p.y)
+                  })),
+                  localWarp: duplicatedWarp
+                };
+
+                try {
+                  const created = await createMask(MODEL_ID, payload);
+
+                  setMasks((prev) =>
+                    sortMasksByZIndex([...prev, { ...created, visible: created.visible !== false }])
+                  );
+
+                  setMaskWarps((prev) => ({
+                    ...prev,
+                    [created.id]: ensureMeshWarp(
+                      created.localWarp || duplicatedWarp,
+                      WALL_W,
+                      WALL_H,
+                      4,
+                      4
+                    )
+                  }));
+                } catch (e) {
+                  console.error(e);
+                  alert("Nie udało się zduplikować maski.");
                 }
-                onClick={() => {
-                  setRenderMode("glb");
-                  setSelectedModelKey("kolejowa");
-                }}
-                type="button"
-              >
-                Fasada szkoły Kolejowej
-              </button>
-
-              <button
-  style={
-    renderMode === "glb" && selectedModelKey === "dworzec"
-      ? ui.buttonPrimary
-      : ui.button
-  }
-  onClick={() => {
-    if (!MODEL_CONFIG.dworzec.enabled) return;
-    setRenderMode("glb");
-    setSelectedModelKey("dworzec");
-  }}
-  type="button"
-  disabled={!MODEL_CONFIG.dworzec.enabled}
->
-  Dworzec Główny
-</button>
-            </div>
-
-            {renderMode === "plane" || selectedModelEnabled ? (
-              <WallScene
-                renderMode={renderMode}
-                modelUrl={selectedModelUrl}
-                points={hasPolygon ? points : []}
-                opacity={opacity}
-                showGrid={showGrid}
-                warp={warp}
-                wallW={WALL_W}
-                wallH={WALL_H}
-                projectionTexture={projectionTexture}
-                projector={projector}
-              />
-            ) : (
-              <div
-                style={{
-                  width: "100%",
-                  minHeight: 420,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 12,
-                  background: "rgba(255,255,255,0.03)",
-                  color: "rgba(255,255,255,0.75)",
-                  textAlign: "center",
-                  padding: 24
-                }}
-              >
-                Model <strong style={{ marginLeft: 6, marginRight: 6 }}>{selectedModel.label}</strong>
-                nie jest jeszcze dodany.
-              </div>
-            )}
-          </SidebarPanel>
-
-          <SidebarPanel title="2D editor">
-            <CanvasEditor
-              mode={mode}
-              setMode={setMode}
-              points={points}
-              setPoints={setPoints}
-              isClosed={isClosed}
-              setIsClosed={setIsClosed}
-              opacity={opacity}
-              showGrid={showGrid}
-              wallW={WALL_W}
-              wallH={WALL_H}
+              }}
+              onSolo={soloMask}
             />
           </SidebarPanel>
         </div>
 
-        <div style={ui.sidebar}>
-          <SidebarPanel title="Scene presets">
+        <div style={ui.center}>
+          <SidebarPanel title="Podgląd 3D">
+            <WallScene
+              renderMode={renderMode}
+              modelUrl={selectedModelUrl}
+              points={hasPolygon ? points : []}
+              opacity={opacity}
+              showGrid={showGrid}
+              warp={warp}
+              wallW={WALL_W}
+              wallH={WALL_H}
+              projectionTexture={projectionTexture}
+              projector={projector}
+            />
+          </SidebarPanel>
+
+          <SidebarPanel title="Edytor rysowania">
+            <CanvasEditor
+              points={points}
+              setPoints={setPoints}
+              isClosed={isClosed}
+              setIsClosed={setIsClosed}
+              wallW={WALL_W}
+              wallH={WALL_H}
+              mode={mode}
+              setMode={setMode}
+              showGrid={showGrid}
+              opacity={opacity}
+            />
+          </SidebarPanel>
+
+          <SidebarPanel title="Globalny warp">
+            <WarpEditor
+              wallW={WALL_W}
+              wallH={WALL_H}
+              warp={warp}
+              setWarp={setWarp}
+            />
+          </SidebarPanel>
+        </div>
+
+        <div style={ui.sidebarRight}>
+          <SidebarPanel title="Ustawienia projekcji">
+            <ProjectorSettings
+              projector={projector}
+              setProjector={setProjector}
+              outputSurfaceMode={outputSurfaceMode}
+              setOutputSurfaceMode={setOutputSurfaceMode}
+              outputModelUrl={outputModelUrl}
+              setOutputModelUrl={setOutputModelUrl}
+              selectedModelKey={selectedModelKey}
+              setSelectedModelKey={setSelectedModelKey}
+              renderMode={renderMode}
+              setRenderMode={setRenderMode}
+            />
+          </SidebarPanel>
+
+          <SidebarPanel title="Zapisane sceny">
             <div style={{ display: "grid", gap: 8 }}>
               <input
-                type="text"
+                style={ui.input}
                 value={sceneName}
                 onChange={(e) => setSceneName(e.target.value)}
-                style={ui.input}
                 placeholder="Nazwa sceny"
               />
+
               <button type="button" style={ui.buttonPrimary} onClick={saveScenePreset}>
-                Save current scene
+                Zapisz scenę
               </button>
             </div>
 
             <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
               {scenePresets.length === 0 ? (
-                <div style={{ fontSize: 12, opacity: 0.75 }}>Brak zapisanych scen.</div>
+                <div style={{ fontSize: 12, opacity: 0.7 }}>Brak zapisanych scen.</div>
               ) : (
-                scenePresets.map((scene) => (
-                  <div
-                    key={scene.id}
-                    style={{
-                      padding: 10,
-                      borderRadius: 12,
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      background: "rgba(255,255,255,0.03)"
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, marginBottom: 8 }}>{scene.name}</div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        style={ui.button}
-                        onClick={() => loadScenePreset(scene)}
-                      >
-                        Load
-                      </button>
-                      <button
-                        type="button"
-                        style={ui.buttonDanger}
-                        onClick={() => deleteScenePreset(scene.id)}
-                      >
-                        Delete
-                      </button>
+                scenePresets
+                  .slice()
+                  .sort((a, b) => b.createdAt - a.createdAt)
+                  .map((preset) => (
+                    <div
+                      key={preset.id}
+                      style={{
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: 10,
+                        padding: 10,
+                        background: "rgba(255,255,255,0.02)"
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>{preset.name}</div>
+                      <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
+                        {new Date(preset.createdAt).toLocaleString()}
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          style={ui.button}
+                          onClick={() => loadScenePreset(preset)}
+                        >
+                          Wczytaj
+                        </button>
+                        <button
+                          type="button"
+                          style={ui.buttonDanger}
+                          onClick={() => deleteScenePreset(preset.id)}
+                        >
+                          Usuń
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))
               )}
             </div>
-          </SidebarPanel>
-
-          <SidebarPanel title="Output surface">
-            <div style={{ display: "grid", gap: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>
-                To steruje tylko Open Output. Lewy preview zostaje osobno.
-              </div>
-
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  style={
-                    outputSurfaceMode === "plane"
-                      ? ui.buttonPrimary
-                      : ui.button
-                  }
-                  onClick={() => setOutputSurfaceMode("plane")}
-                >
-                  Plane
-                </button>
-
-                <button
-                  type="button"
-                  style={
-                    outputSurfaceMode === "lightGlb"
-                      ? ui.buttonPrimary
-                      : ui.button
-                  }
-                  onClick={() => setOutputSurfaceMode("lightGlb")}
-                >
-                  Light GLB
-                </button>
-
-                <button
-                  type="button"
-                  style={
-                    outputSurfaceMode === "glb"
-                      ? ui.buttonPrimary
-                      : ui.button
-                  }
-                  onClick={() => setOutputSurfaceMode("glb")}
-                >
-                  Full GLB
-                </button>
-              </div>
-
-              <div style={{ fontSize: 12, opacity: 0.8 }}>
-                Aktualny model outputu:
-              </div>
-
-              <input
-                type="text"
-                value={outputModelUrl}
-                onChange={(e) => setOutputModelUrl(e.target.value)}
-                style={ui.input}
-                placeholder="/models/fasada.glb"
-              />
-            </div>
-          </SidebarPanel>
-
-          <SidebarPanel title="Selected mask / draft warp">
-            <WarpEditor
-              warp={selectedOrDraftLocalWarp}
-              setWarp={setSelectedOrDraftLocalWarp}
-              wallW={WALL_W}
-              wallH={WALL_H}
-              sourcePoints={hasPolygon ? points : []}
-              sourceEnabled={hasPolygon}
-              autoFitLabel="Auto-fit do maski"
-            />
-          </SidebarPanel>
-
-          <SidebarPanel title="Global output warp">
-            <WarpEditor
-              warp={warp}
-              setWarp={setWarp}
-              wallW={WALL_W}
-              wallH={WALL_H}
-              sourcePoints={[]}
-              sourceEnabled={false}
-              autoFitLabel="Auto-fit"
-            />
-          </SidebarPanel>
-
-          <SidebarPanel title="Projector settings">
-            <ProjectorSettings
-              projector={projector}
-              setProjector={setProjector}
-            />
           </SidebarPanel>
         </div>
       </div>
