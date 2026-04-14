@@ -120,11 +120,7 @@ function ProjectorHelper({ projector }) {
   );
 }
 
-function LayeredPlane({
-  textures,
-  projector,
-  depthOffsets
-}) {
+function LayeredPlane({ textures, projector, depthOffsets }) {
   const backMaterial = useProjectedMaterial(textures?.back, projector, 8 / 5, 0);
   const middleMaterial = useProjectedMaterial(textures?.middle, projector, 8 / 5, 1);
   const frontMaterial = useProjectedMaterial(textures?.front, projector, 8 / 5, 2);
@@ -197,7 +193,6 @@ function FittedLayeredGlbModel({
   }, [scene]);
 
   const baseClone = useMemo(() => scene.clone(), [scene]);
-
   const backClone = useMemo(() => scene.clone(), [scene]);
   const middleClone = useMemo(() => scene.clone(), [scene]);
   const frontClone = useMemo(() => scene.clone(), [scene]);
@@ -217,6 +212,12 @@ function FittedLayeredGlbModel({
         });
       }
     });
+
+    return () => {
+      baseClone.traverse((obj) => {
+        if (obj.isMesh) obj.material?.dispose?.();
+      });
+    };
   }, [baseClone]);
 
   useEffect(() => {
@@ -305,7 +306,9 @@ function SceneContent({
   modelUrl,
   textures,
   projector,
-  depthOffsets
+  depthOffsets,
+  showHelpers = true,
+  showGrid = true
 }) {
   return (
     <>
@@ -315,15 +318,17 @@ function SceneContent({
       <directionalLight position={[-4, 2, 6]} intensity={0.8} />
       <directionalLight position={[0, 0, 8]} intensity={0.6} />
 
-      <Grid
-        args={[20, 20]}
-        cellSize={1}
-        sectionSize={5}
-        fadeDistance={30}
-        fadeStrength={1}
-      />
+      {showGrid ? (
+        <Grid
+          args={[20, 20]}
+          cellSize={1}
+          sectionSize={5}
+          fadeDistance={30}
+          fadeStrength={1}
+        />
+      ) : null}
 
-      <ProjectorHelper projector={projector} />
+      {showHelpers ? <ProjectorHelper projector={projector} /> : null}
 
       {mode === "glb" ? (
         <FittedLayeredGlbModel
@@ -353,7 +358,10 @@ export default function ProjectedSimpleScene({
     front: 0.06,
     middle: 0,
     back: -0.06
-  }
+  },
+  enableControls = true,
+  showHelpers = true,
+  showGrid = true
 }) {
   return (
     <>
@@ -363,8 +371,10 @@ export default function ProjectedSimpleScene({
         textures={textures}
         projector={projector}
         depthOffsets={depthOffsets}
+        showHelpers={showHelpers}
+        showGrid={showGrid}
       />
-      <OrbitControls />
+      {enableControls ? <OrbitControls /> : null}
     </>
   );
 }

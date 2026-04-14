@@ -734,6 +734,91 @@ function buildCompositeTexture({
   return compositeCanvas;
 }
 
+
+
+function drawMaskPath(ctx, mask) {
+  const pts = Array.isArray(mask?.points) ? mask.points : [];
+  if (pts.length < 2) return false;
+
+  ctx.beginPath();
+  ctx.moveTo(Number(pts[0]?.x || 0), Number(pts[0]?.y || 0));
+
+  for (let i = 1; i < pts.length; i += 1) {
+    ctx.lineTo(Number(pts[i]?.x || 0), Number(pts[i]?.y || 0));
+  }
+
+  if (pts.length >= 3 && mask?.isClosed !== false) {
+    ctx.closePath();
+  }
+
+  return true;
+}
+
+function drawMaskOutline(ctx, mask, color = "#ffffff", width = 2) {
+  const ok = drawMaskPath(ctx, mask);
+  if (!ok) return;
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.shadowColor = color;
+  ctx.shadowBlur = Math.max(0, width * 0.5);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawAllMaskOutlines(ctx, masks = [], activeDraft, color, width) {
+  masks.forEach((mask) => drawMaskOutline(ctx, mask, color, width));
+
+  if (activeDraft?.points?.length >= 2) {
+    drawMaskOutline(ctx, activeDraft, color, width);
+  }
+}
+
+function getPulseAlpha(speed = 1.6) {
+  const t = performance.now() / 1000;
+  return 0.35 + 0.65 * ((Math.sin(t * Math.PI * speed) + 1) / 2);
+}
+
+function drawFlashOverlay(
+  ctx,
+  mask,
+  mode = "off",
+  color = "#ffea00",
+  speed = 1.6,
+  outlineWidth = 2
+) {
+  if (!mask || mode === "off") return;
+
+  const ok = drawMaskPath(ctx, mask);
+  if (!ok) return;
+
+  const alpha = getPulseAlpha(speed);
+
+  ctx.save();
+
+  if (mode === "fill" || mode === "both") {
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.35 + alpha * 0.45;
+    ctx.fill();
+  }
+
+  if (mode === "outline" || mode === "both") {
+    ctx.globalAlpha = 0.7 + alpha * 0.3;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(outlineWidth, 4);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.shadowColor = color;
+    ctx.shadowBlur = Math.max(outlineWidth * 2, 8);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 export function createProjectionTextureAsset({
   wallW,
   wallH,
@@ -741,9 +826,17 @@ export function createProjectionTextureAsset({
   showPinkBackground,
   masks,
   activeDraft,
+  finalWarp = null,
   imageCache,
   videoCache,
-  onAssetReady
+  onAssetReady,
+  outlineMode = "off",
+  outlineColor = "#ffffff",
+  outlineWidth = 2,
+  selectedMaskId = null,
+  selectedMaskFlashMode = "off",
+  selectedMaskFlashColor = "#ffea00",
+  selectedMaskFlashSpeed = 1.6
 }) {
   const canvas = document.createElement("canvas");
   canvas.width = wallW;
@@ -774,10 +867,83 @@ export function createProjectionTextureAsset({
       onAssetReady
     });
 
-    ctx.save();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.drawImage(compositeTexture, 0, 0);
-    ctx.restore();
+   let sourceCanvas = compositeTexture;
+
+if (outlineMode === "only") {
+  const outlineCanvas = document.createElement("canvas");
+  outlineCanvas.width = wallW;
+  outlineCanvas.height = wallH;
+
+  const outlineCtx = outlineCanvas.getContext("2d");
+  outlineCtx.clearRect(0, 0, wallW, wallH);
+
+  drawAllMaskOutlines(
+    outlineCtx,
+    masks,
+    activeDraft,
+    outlineColor,
+    outlineWidth
+  );
+
+  const flashMask =
+    selectedMaskId === "__draft__"
+      ? activeDraft
+      : masks.find((m) => String(m?.id) === String(selectedMaskId));
+
+  drawFlashOverlay(
+    outlineCtx,
+    flashMask,
+    selectedMaskFlashMode === "fill" ? "outline" : selectedMaskFlashMode,
+    selectedMaskFlashColor,
+    selectedMaskFlashSpeed,
+    Math.max(outlineWidth, 3)
+  );
+
+  sourceCanvas = outlineCanvas;
+} else {
+  const overlayCanvas = document.createElement("canvas");
+  overlayCanvas.width = wallW;
+  overlayCanvas.height = wallH;
+
+  const overlayCtx = overlayCanvas.getContext("2d");
+  overlayCtx.clearRect(0, 0, wallW, wallH);
+  overlayCtx.drawImage(compositeTexture, 0, 0);
+
+  if (outlineMode === "overlay") {
+    drawAllMaskOutlines(
+      overlayCtx,
+      masks,
+      activeDraft,
+      outlineColor,
+      outlineWidth
+    );
+  }
+
+  const flashMask =
+    selectedMaskId === "__draft__"
+      ? activeDraft
+      : masks.find((m) => String(m?.id) === String(selectedMaskId));
+
+  drawFlashOverlay(
+    overlayCtx,
+    flashMask,
+    selectedMaskFlashMode,
+    selectedMaskFlashColor,
+    selectedMaskFlashSpeed,
+    Math.max(outlineWidth, 3)
+  );
+
+  sourceCanvas = overlayCanvas;
+}
+
+const finalCanvas = finalWarp
+  ? applyMeshWarpToCanvas(sourceCanvas, finalWarp, wallW, wallH)
+  : sourceCanvas;
+
+ctx.save();
+ctx.globalCompositeOperation = "source-over";
+ctx.drawImage(finalCanvas, 0, 0);
+ctx.restore();
   };
 
   redraw();

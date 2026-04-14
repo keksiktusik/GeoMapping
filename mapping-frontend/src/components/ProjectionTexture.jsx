@@ -11,7 +11,15 @@ export default function ProjectionTexture({
   showPinkBackground = true,
   masks = [],
   activeDraft = null,
-  onTexture
+  finalWarp = null,
+  onTexture,
+  outlineMode = "off",
+  outlineColor = "#ffffff",
+  outlineWidth = 2,
+  selectedMaskId = null,
+  selectedMaskFlashMode = "off",
+  selectedMaskFlashColor = "#ffea00",
+  selectedMaskFlashSpeed = 1.6
 }) {
   const imageCache = useRef(new Map());
   const videoCache = useRef(new Map());
@@ -30,9 +38,17 @@ export default function ProjectionTexture({
         showPinkBackground,
         masks,
         activeDraft,
+        finalWarp,
         imageCache,
         videoCache,
-        onAssetReady: requestRefresh
+        onAssetReady: requestRefresh,
+        outlineMode,
+        outlineColor,
+        outlineWidth,
+        selectedMaskId,
+        selectedMaskFlashMode,
+        selectedMaskFlashColor,
+        selectedMaskFlashSpeed
       }),
     [
       wallW,
@@ -41,8 +57,16 @@ export default function ProjectionTexture({
       showPinkBackground,
       masks,
       activeDraft,
+      finalWarp,
       requestRefresh,
-      refreshValue
+      refreshValue,
+      outlineMode,
+      outlineColor,
+      outlineWidth,
+      selectedMaskId,
+      selectedMaskFlashMode,
+      selectedMaskFlashColor,
+      selectedMaskFlashSpeed
     ]
   );
 
@@ -83,22 +107,14 @@ export default function ProjectionTexture({
       });
     };
 
-    const handleVisibility = () => {
-      reviveVideos();
-    };
-
-    const handleFocus = () => {
-      reviveVideos();
-    };
-
-    document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("focus", handleFocus);
-    window.addEventListener("pageshow", handleFocus);
+    document.addEventListener("visibilitychange", reviveVideos);
+    window.addEventListener("focus", reviveVideos);
+    window.addEventListener("pageshow", reviveVideos);
 
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("pageshow", handleFocus);
+      document.removeEventListener("visibilitychange", reviveVideos);
+      window.removeEventListener("focus", reviveVideos);
+      window.removeEventListener("pageshow", reviveVideos);
     };
   }, []);
 

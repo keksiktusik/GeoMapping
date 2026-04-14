@@ -127,6 +127,13 @@ function offsetPoints(points, dx, dy, wallW, wallH) {
   }));
 }
 
+function movePoints(points, dx, dy, wallW, wallH) {
+  return (points || []).map((p) => ({
+    x: Math.max(0, Math.min(wallW, Number(p.x || 0) + dx)),
+    y: Math.max(0, Math.min(wallH, Number(p.y || 0) + dy))
+  }));
+}
+
 function offsetWarp(warp, dx, dy, wallW, wallH, cols = 4, rows = 4) {
   const mesh = ensureMeshWarp(warp, wallW, wallH, cols, rows);
 
@@ -152,6 +159,28 @@ function normalizeIncomingMasks(list) {
 
 function sortMasksByZIndex(list) {
   return [...list].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+}
+
+function pointInPolygon(point, polygon) {
+  const pts = Array.isArray(polygon) ? polygon : [];
+  if (pts.length < 3) return false;
+
+  let inside = false;
+
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = Number(pts[i]?.x || 0);
+    const yi = Number(pts[i]?.y || 0);
+    const xj = Number(pts[j]?.x || 0);
+    const yj = Number(pts[j]?.y || 0);
+
+    const intersect =
+      yi > point.y !== yj > point.y &&
+      point.x < ((xj - xi) * (point.y - yi)) / ((yj - yi) || 1e-9) + xi;
+
+    if (intersect) inside = !inside;
+  }
+
+  return inside;
 }
 
 export default function ModelPage() {
@@ -199,6 +228,9 @@ export default function ModelPage() {
   const [showPinkBackground, setShowPinkBackground] = useState(
     stored?.showPinkBackground !== false
   );
+  const [editorSoloSelected, setEditorSoloSelected] = useState(
+    Boolean(stored?.editorSoloSelected)
+  );
 
   const [warp, setWarp] = useState(() =>
     ensureMeshWarp(stored?.warp, WALL_W, WALL_H, 5, 5)
@@ -219,15 +251,64 @@ export default function ModelPage() {
     ensureMeshWarp(stored?.draftLocalWarp, WALL_W, WALL_H, 4, 4)
   );
 
-  const [projector, setProjector] = useState({
-    distance: 2.5,
-    offsetX: 0,
-    offsetY: 0,
-    angleX: 0,
-    angleY: 0,
-    angleZ: 0,
-    fov: 45
-  });
+  const [projector, setProjector] = useState(() => ({
+    distance: Number(stored?.projector?.distance ?? 2.5),
+    offsetX: Number(stored?.projector?.offsetX ?? 0),
+    offsetY: Number(stored?.projector?.offsetY ?? 0),
+    angleX: Number(stored?.projector?.angleX ?? 0),
+    angleY: Number(stored?.projector?.angleY ?? 0),
+    angleZ: Number(stored?.projector?.angleZ ?? 0),
+    fov: Number(stored?.projector?.fov ?? 45)
+  }));
+
+  const [calibration, setCalibration] = useState(() => ({
+    showOverlay: stored?.calibration?.showOverlay !== false,
+    showGrid: stored?.calibration?.showGrid !== false,
+    showCrosshair: stored?.calibration?.showCrosshair !== false,
+    nudgeStep: [0.01, 0.02, 0.05, 0.1, 0.25].includes(Number(stored?.calibration?.nudgeStep))
+      ? Number(stored.calibration.nudgeStep)
+      : 0.05,
+    angleStep: [0.5, 1, 2, 5].includes(Number(stored?.calibration?.angleStep))
+      ? Number(stored.calibration.angleStep)
+      : 1,
+    showInfo: stored?.calibration?.showInfo !== false,
+    pattern: ["none", "frame", "checkerboard", "windows", "bands", "cross"].includes(
+      stored?.calibration?.pattern
+    )
+      ? stored.calibration.pattern
+      : "none",
+    patternOpacity: Math.max(
+      0.1,
+      Math.min(1, Number(stored?.calibration?.patternOpacity || 0.8))
+    ),
+    maskOutlineMode: ["off", "overlay", "only"].includes(stored?.calibration?.maskOutlineMode)
+      ? stored.calibration.maskOutlineMode
+      : "off",
+    maskOutlineColor:
+      typeof stored?.calibration?.maskOutlineColor === "string"
+        ? stored.calibration.maskOutlineColor
+        : "#ffffff",
+    maskOutlineWidth: Math.max(
+      1,
+      Math.min(12, Number(stored?.calibration?.maskOutlineWidth || 2))
+    ),
+    selectedMaskFlashMode: ["off", "fill", "outline", "both"].includes(
+      stored?.calibration?.selectedMaskFlashMode
+    )
+      ? stored.calibration.selectedMaskFlashMode
+      : "off",
+    selectedMaskFlashColor:
+      typeof stored?.calibration?.selectedMaskFlashColor === "string"
+        ? stored.calibration.selectedMaskFlashColor
+        : "#ffea00",
+    selectedMaskFlashSpeed: Math.max(
+      0.2,
+      Math.min(6, Number(stored?.calibration?.selectedMaskFlashSpeed || 1.6))
+    ),
+    selectedMaskSoloInOutput: Boolean(stored?.calibration?.selectedMaskSoloInOutput),
+    outputBlackoutMode: Boolean(stored?.calibration?.outputBlackoutMode),
+    selectedMaskOutlineBoost: stored?.calibration?.selectedMaskOutlineBoost !== false
+  }));
 
   const [maskName, setMaskName] = useState("");
   const [maskType, setMaskType] = useState("window");
@@ -245,6 +326,8 @@ export default function ModelPage() {
 
   const [projectionTexture, setProjectionTexture] = useState(null);
   const [backendStatus] = useState("online");
+  const [isSavingOutputBackend, setIsSavingOutputBackend] = useState(false);
+  const [isSavingSceneSnapshot, setIsSavingSceneSnapshot] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -375,6 +458,22 @@ export default function ModelPage() {
       selectedOrDraftLocalWarp
     ]
   );
+
+  const editorVisibleMasks = useMemo(() => {
+    if (!editorSoloSelected || selectedMaskId == null) {
+      return masksWithLocalWarp;
+    }
+
+    return masksWithLocalWarp.filter(
+      (m) => String(m.id) === String(selectedMaskId)
+    );
+  }, [editorSoloSelected, selectedMaskId, masksWithLocalWarp]);
+
+  const editorActiveDraft = useMemo(() => {
+    if (!editorSoloSelected) return activeDraft;
+    if (selectedMaskId == null) return activeDraft;
+    return activeDraft;
+  }, [editorSoloSelected, selectedMaskId, activeDraft]);
 
   const resetDraft = () => {
     setPoints([]);
@@ -736,6 +835,43 @@ export default function ModelPage() {
     }
   };
 
+  const moveSelectedMask = async (dx, dy) => {
+    if (selectedMaskId === null) return;
+
+    const current = masks.find((m) => m.id === selectedMaskId);
+    if (!current) return;
+
+    const movedPoints = movePoints(
+      Array.isArray(current.points) ? current.points : [],
+      dx,
+      dy,
+      WALL_W,
+      WALL_H
+    );
+
+    const movedWarp = offsetWarp(
+      maskWarps[selectedMaskId] || current.localWarp,
+      dx,
+      dy,
+      WALL_W,
+      WALL_H,
+      4,
+      4
+    );
+
+    setPoints(movedPoints);
+
+    setMaskWarps((prev) => ({
+      ...prev,
+      [selectedMaskId]: movedWarp
+    }));
+
+    await patchMaskLocal(selectedMaskId, {
+      points: movedPoints,
+      localWarp: movedWarp
+    });
+  };
+
   const toggleMaskVisible = async (id) => {
     const mask = masks.find((m) => m.id === id);
     if (!mask) return;
@@ -798,7 +934,12 @@ export default function ModelPage() {
       outputSurfaceMode,
       outputModelUrl,
       projector,
+      calibration,
       warp,
+      showGrid,
+      showPinkBackground,
+      selectedMaskId,
+      editorSoloSelected,
       masks: masks.map((m) => ({
         id: m.id,
         visible: m.visible !== false,
@@ -812,8 +953,143 @@ export default function ModelPage() {
       }))
     };
 
-    setScenePresets((prev) => [...prev, snapshot]);
+    setScenePresets((prev) => {
+      const existingIndex = prev.findIndex(
+        (item) => item.name.trim().toLowerCase() === name.toLowerCase()
+      );
+
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        next[existingIndex] = {
+          ...snapshot,
+          id: prev[existingIndex].id
+        };
+        return next;
+      }
+
+      return [...prev, snapshot];
+    });
+
     setSceneName("");
+  };
+
+  const saveCalibrationSnapshot = async () => {
+    setIsSavingSceneSnapshot(true);
+    try {
+      const name = sceneName.trim() || `Kalibracja ${new Date().toLocaleString()}`;
+      setSceneName(name);
+
+      const snapshot = {
+        id: `${Date.now()}`,
+        name,
+        createdAt: Date.now(),
+        selectedModelKey,
+        renderMode,
+        outputSurfaceMode,
+        outputModelUrl,
+        projector,
+        calibration,
+        warp,
+        showGrid,
+        showPinkBackground,
+        selectedMaskId,
+        editorSoloSelected,
+        masks: masks.map((m) => ({
+          id: m.id,
+          visible: m.visible !== false,
+          locked: Boolean(m.locked),
+          zIndex: m.zIndex ?? 0,
+          opacity: typeof m.opacity === "number" ? m.opacity : 1,
+          operation: normalizeMaskOperation(m.type, m.operation),
+          textureType: m.textureType || "color",
+          textureValue: m.textureValue || "#ffffff",
+          layerName: m.layerName || "default"
+        }))
+      };
+
+      setScenePresets((prev) => {
+        const existingIndex = prev.findIndex(
+          (item) => item.name.trim().toLowerCase() === name.toLowerCase()
+        );
+
+        if (existingIndex >= 0) {
+          const next = [...prev];
+          next[existingIndex] = {
+            ...snapshot,
+            id: prev[existingIndex].id
+          };
+          return next;
+        }
+
+        return [...prev, snapshot];
+      });
+
+      alert("Zapisano kalibrację sceny.");
+    } catch (e) {
+      console.error(e);
+      alert("Nie udało się zapisać kalibracji sceny.");
+    } finally {
+      setIsSavingSceneSnapshot(false);
+    }
+  };
+
+  const syncOutputStateToBackend = async () => {
+    setIsSavingOutputBackend(true);
+    try {
+      const raw = localStorage.getItem(STORAGE_OUTPUT);
+      const parsed = safeParse(raw, null);
+
+      if (!parsed) {
+        alert("Brak stanu outputu do zapisania.");
+        return;
+      }
+
+      const outputMasks = Array.isArray(parsed.masks) ? parsed.masks : [];
+      if (!outputMasks.length) {
+        alert("Brak masek w aktualnym stanie outputu.");
+        return;
+      }
+
+      for (const mask of outputMasks) {
+        if (!mask?.id) continue;
+
+        await apiUpdateMask(mask.id, {
+          name: mask.name,
+          type: mask.type,
+          operation: normalizeMaskOperation(mask.type, mask.operation),
+          zIndex: Number(mask.zIndex || 0),
+          visible: mask.visible !== false,
+          locked: Boolean(mask.locked),
+          layerName: mask.layerName || "default",
+          textureType: mask.textureType || "color",
+          textureValue: normalizeTextureValue(mask.textureType, mask.textureValue),
+          opacity: typeof mask.opacity === "number" ? mask.opacity : 0.35,
+          points: (mask.points || []).map((p) => ({
+            x: Math.round(Number(p.x || 0)),
+            y: Math.round(Number(p.y || 0))
+          })),
+          localWarp: mask.localWarp || null
+        });
+      }
+
+      const refreshed = await getMasks(MODEL_ID);
+      const normalizedMasks = normalizeIncomingMasks(refreshed);
+
+      setMasks(sortMasksByZIndex(normalizedMasks));
+
+      const nextWarps = {};
+      normalizedMasks.forEach((m) => {
+        nextWarps[m.id] = ensureMeshWarp(m.localWarp, WALL_W, WALL_H, 4, 4);
+      });
+      setMaskWarps(nextWarps);
+
+      alert("Zapisano aktualny stan outputu do backendu.");
+    } catch (e) {
+      console.error(e);
+      alert("Nie udało się zapisać zmian z outputu do backendu.");
+    } finally {
+      setIsSavingOutputBackend(false);
+    }
   };
 
   const loadScenePreset = async (preset) => {
@@ -827,8 +1103,20 @@ export default function ModelPage() {
         MODEL_CONFIG[preset.selectedModelKey || "mickiewicz"]?.url ||
         MODEL_CONFIG.mickiewicz.url
     );
+
     setProjector(preset.projector || projector);
+    setCalibration((prev) => ({
+      ...prev,
+      ...(preset.calibration || {})
+    }));
     setWarp(ensureMeshWarp(preset.warp, WALL_W, WALL_H, 5, 5));
+    setShowGrid(Boolean(preset.showGrid));
+    setShowPinkBackground(preset.showPinkBackground !== false);
+    setEditorSoloSelected(Boolean(preset.editorSoloSelected));
+
+    if (preset.selectedMaskId != null) {
+      setSelectedMaskId(preset.selectedMaskId);
+    }
 
     for (const saved of preset.masks || []) {
       const current = masks.find((m) => m.id === saved.id);
@@ -851,6 +1139,20 @@ export default function ModelPage() {
     setScenePresets((prev) => prev.filter((s) => s.id !== id));
   };
 
+  const selectMaskByIndex = (index) => {
+    const ordered = [...masks].sort(
+      (a, b) => Number(a.zIndex || 0) - Number(b.zIndex || 0)
+    );
+
+    if (!ordered.length) return;
+
+    const safeIndex = Math.max(0, Math.min(ordered.length - 1, index));
+    const nextMask = ordered[safeIndex];
+    if (nextMask) {
+      handleSelectMask(nextMask.id);
+    }
+  };
+
   useEffect(() => {
     setTextureValue((prev) => normalizeTextureValue(textureType, prev));
   }, [textureType]);
@@ -865,6 +1167,7 @@ export default function ModelPage() {
           points,
           isClosed,
           opacity,
+          editorSoloSelected,
           showGrid,
           showPinkBackground,
           masks: masksWithLocalWarp,
@@ -872,6 +1175,8 @@ export default function ModelPage() {
           draftLocalWarp,
           warp,
           projector,
+          calibration,
+          selectedMaskId: selectedMaskId ?? "__draft__",
           renderMode,
           selectedModelKey,
           outputSurfaceMode,
@@ -902,6 +1207,7 @@ export default function ModelPage() {
     points,
     isClosed,
     opacity,
+    editorSoloSelected,
     showGrid,
     showPinkBackground,
     masksWithLocalWarp,
@@ -909,6 +1215,7 @@ export default function ModelPage() {
     draftLocalWarp,
     warp,
     projector,
+    calibration,
     renderMode,
     selectedModelKey,
     outputSurfaceMode,
@@ -924,6 +1231,244 @@ export default function ModelPage() {
     textureType,
     normalizedTextureValue,
     selectedOrDraftLocalWarp
+  ]);
+
+  useEffect(() => {
+    if (isOutput) return;
+
+    const onStorage = (e) => {
+      if (e.key !== STORAGE_OUTPUT || !e.newValue) return;
+
+      const parsed = safeParse(e.newValue, null);
+      if (!parsed) return;
+
+      const nextMasks = normalizeIncomingMasks(parsed.masks || []);
+      if (nextMasks.length) {
+        setMasks(sortMasksByZIndex(nextMasks));
+
+        const nextWarps = {};
+        nextMasks.forEach((m) => {
+          nextWarps[m.id] = ensureMeshWarp(m.localWarp, WALL_W, WALL_H, 4, 4);
+        });
+        setMaskWarps(nextWarps);
+      }
+
+      setProjector((prev) => ({
+        ...prev,
+        ...(parsed.projector || {})
+      }));
+
+      setCalibration((prev) => ({
+        ...prev,
+        ...(parsed.calibration || {})
+      }));
+
+      setEditorSoloSelected(Boolean(parsed.editorSoloSelected));
+
+      const nextSelectedId =
+        parsed.selectedMaskId && parsed.selectedMaskId !== "__draft__"
+          ? parsed.selectedMaskId
+          : null;
+
+      setSelectedMaskId(nextSelectedId);
+
+      if (nextSelectedId != null) {
+        const selectedMask = nextMasks.find((m) => String(m.id) === String(nextSelectedId));
+        if (selectedMask) {
+          setMaskName(selectedMask.name || "");
+          setMaskType(selectedMask.type || "window");
+          setOperation(normalizeMaskOperation(selectedMask.type, selectedMask.operation));
+          setZIndex(typeof selectedMask.zIndex === "number" ? selectedMask.zIndex : Number(selectedMask.zIndex || 0));
+          setVisible(selectedMask.visible !== false);
+          setLocked(Boolean(selectedMask.locked));
+          setLayerName(selectedMask.layerName || "default");
+
+          const nextTextureType = selectedMask.textureType || "color";
+          const nextTextureValue = normalizeTextureValue(
+            nextTextureType,
+            selectedMask.textureValue
+          );
+
+          setTextureType(nextTextureType);
+          setTextureValue(nextTextureValue);
+          setPoints(Array.isArray(selectedMask.points) ? selectedMask.points : []);
+          setOpacity(typeof selectedMask.opacity === "number" ? selectedMask.opacity : 0.35);
+          setIsClosed(true);
+          setMode("edit");
+        }
+      }
+    };
+
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [isOutput]);
+
+  useEffect(() => {
+    if (isOutput) return;
+
+    const onKeyDown = async (e) => {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      const isTyping =
+        tag === "input" || tag === "textarea" || tag === "select";
+
+      if (isTyping) return;
+
+      if (e.key === "Delete" && selectedMaskId !== null) {
+        e.preventDefault();
+        await deleteMask(selectedMaskId);
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+        if (selectedMaskId !== null) {
+          e.preventDefault();
+          await duplicateSelected();
+        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        resetDraft();
+        return;
+      }
+
+      if (e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        setShowGrid((prev) => !prev);
+        return;
+      }
+
+      if (e.altKey && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        setEditorSoloSelected((prev) => !prev);
+        return;
+      }
+
+      if (e.key === "PageDown") {
+        e.preventDefault();
+
+        const ordered = [...masks].sort(
+          (a, b) => Number(a.zIndex || 0) - Number(b.zIndex || 0)
+        );
+
+        if (!ordered.length) return;
+
+        if (selectedMaskId == null) {
+          handleSelectMask(ordered[0].id);
+          return;
+        }
+
+        const currentIndex = ordered.findIndex(
+          (m) => String(m.id) === String(selectedMaskId)
+        );
+
+        const nextIndex =
+          currentIndex < 0
+            ? 0
+            : Math.min(ordered.length - 1, currentIndex + 1);
+
+        handleSelectMask(ordered[nextIndex].id);
+        return;
+      }
+
+      if (e.key === "PageUp") {
+        e.preventDefault();
+
+        const ordered = [...masks].sort(
+          (a, b) => Number(a.zIndex || 0) - Number(b.zIndex || 0)
+        );
+
+        if (!ordered.length) return;
+
+        if (selectedMaskId == null) {
+          handleSelectMask(ordered[ordered.length - 1].id);
+          return;
+        }
+
+        const currentIndex = ordered.findIndex(
+          (m) => String(m.id) === String(selectedMaskId)
+        );
+
+        const nextIndex =
+          currentIndex < 0
+            ? ordered.length - 1
+            : Math.max(0, currentIndex - 1);
+
+        handleSelectMask(ordered[nextIndex].id);
+        return;
+      }
+
+      if (e.key === "Home") {
+        e.preventDefault();
+        selectMaskByIndex(0);
+        return;
+      }
+
+      if (e.key === "End") {
+        e.preventDefault();
+        const ordered = [...masks].sort(
+          (a, b) => Number(a.zIndex || 0) - Number(b.zIndex || 0)
+        );
+        if (!ordered.length) return;
+        selectMaskByIndex(ordered.length - 1);
+        return;
+      }
+
+      if (e.key === "[" && selectedMaskId !== null) {
+        e.preventDefault();
+        const nextDepth = Number(zIndex || 0) - 1;
+        setZIndex(nextDepth);
+        await patchMaskLocal(selectedMaskId, { zIndex: nextDepth });
+        return;
+      }
+
+      if (e.key === "]" && selectedMaskId !== null) {
+        e.preventDefault();
+        const nextDepth = Number(zIndex || 0) + 1;
+        setZIndex(nextDepth);
+        await patchMaskLocal(selectedMaskId, { zIndex: nextDepth });
+        return;
+      }
+
+      if (e.shiftKey && selectedMaskId !== null) {
+        const step = 2;
+
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          await moveSelectedMask(-step, 0);
+          return;
+        }
+
+        if (e.key === "ArrowRight") {
+          e.preventDefault();
+          await moveSelectedMask(step, 0);
+          return;
+        }
+
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          await moveSelectedMask(0, -step);
+          return;
+        }
+
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          await moveSelectedMask(0, step);
+          return;
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    isOutput,
+    selectedMaskId,
+    zIndex,
+    masks,
+    maskWarps,
+    editorSoloSelected
   ]);
 
   if (isOutput) {
@@ -942,6 +1487,23 @@ export default function ModelPage() {
     );
   };
 
+  const handlePreviewPick = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const x = ((e.clientX - rect.left) / rect.width) * WALL_W;
+    const y = ((e.clientY - rect.top) / rect.height) * WALL_H;
+
+    const candidates = [...masks]
+      .filter((m) => m.visible !== false && Array.isArray(m.points) && m.points.length >= 3)
+      .sort((a, b) => Number(b.zIndex || 0) - Number(a.zIndex || 0));
+
+    const hit = candidates.find((mask) => pointInPolygon({ x, y }, mask.points));
+    if (hit) {
+      handleSelectMask(hit.id);
+    }
+  };
+
   return (
     <div style={ui.page}>
       <TopBar
@@ -956,8 +1518,8 @@ export default function ModelPage() {
         wallH={WALL_H}
         showGrid={showGrid}
         showPinkBackground={showPinkBackground}
-        masks={masksWithLocalWarp}
-        activeDraft={activeDraft}
+        masks={editorVisibleMasks}
+        activeDraft={editorActiveDraft}
         onTexture={setProjectionTexture}
       />
 
@@ -1138,18 +1700,37 @@ export default function ModelPage() {
 
         <div style={ui.center}>
           <SidebarPanel title="Podgląd 3D">
-            <WallScene
-              renderMode={renderMode}
-              modelUrl={selectedModelUrl}
-              points={hasPolygon ? points : []}
-              opacity={opacity}
-              showGrid={showGrid}
-              warp={warp}
-              wallW={WALL_W}
-              wallH={WALL_H}
-              projectionTexture={projectionTexture}
-              projector={projector}
-            />
+            <div
+              style={{
+                position: "relative",
+                width: "100%",
+                minHeight: 420
+              }}
+            >
+              <WallScene
+                renderMode={renderMode}
+                modelUrl={selectedModelUrl}
+                points={hasPolygon ? points : []}
+                opacity={opacity}
+                showGrid={showGrid}
+                warp={warp}
+                wallW={WALL_W}
+                wallH={WALL_H}
+                projectionTexture={projectionTexture}
+                projector={projector}
+              />
+
+              <div
+                onPointerDown={handlePreviewPick}
+                title="Kliknij maskę na podglądzie, aby ją wybrać"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  cursor: "crosshair",
+                  background: "transparent"
+                }}
+              />
+            </div>
           </SidebarPanel>
 
           <SidebarPanel title="Edytor rysowania">
@@ -1178,19 +1759,181 @@ export default function ModelPage() {
         </div>
 
         <div style={ui.sidebarRight}>
+          <SidebarPanel title="Model i output">
+            <div style={{ display: "grid", gap: 10 }}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={ui.label}>Tryb podglądu</span>
+                <select
+                  style={ui.input}
+                  value={renderMode}
+                  onChange={(e) => setRenderMode(e.target.value)}
+                >
+                  <option value="glb">GLB</option>
+                  <option value="plane">Plane</option>
+                </select>
+              </label>
+
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={ui.label}>Wybrana fasada</span>
+                <select
+                  style={ui.input}
+                  value={selectedModelKey}
+                  onChange={(e) => {
+                    const nextKey = e.target.value;
+                    setSelectedModelKey(nextKey);
+
+                    const nextModel = MODEL_CONFIG[nextKey];
+                    if (nextModel?.url) {
+                      setOutputModelUrl(nextModel.url);
+                    }
+                  }}
+                >
+                  {Object.entries(MODEL_CONFIG)
+                    .filter(([, model]) => model.enabled !== false)
+                    .map(([key, model]) => (
+                      <option key={key} value={key}>
+                        {model.label}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={ui.label}>Powierzchnia outputu</span>
+                <select
+                  style={ui.input}
+                  value={outputSurfaceMode}
+                  onChange={(e) => setOutputSurfaceMode(e.target.value)}
+                >
+                  <option value="plane">Plane</option>
+                  <option value="lightGlb">Light GLB</option>
+                  <option value="glb">Full GLB</option>
+                </select>
+              </label>
+
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={ui.label}>URL modelu output</span>
+                <input
+                  style={ui.input}
+                  value={outputModelUrl}
+                  onChange={(e) => setOutputModelUrl(e.target.value)}
+                />
+              </label>
+            </div>
+          </SidebarPanel>
+
           <SidebarPanel title="Ustawienia projekcji">
             <ProjectorSettings
               projector={projector}
               setProjector={setProjector}
-              outputSurfaceMode={outputSurfaceMode}
-              setOutputSurfaceMode={setOutputSurfaceMode}
-              outputModelUrl={outputModelUrl}
-              setOutputModelUrl={setOutputModelUrl}
-              selectedModelKey={selectedModelKey}
-              setSelectedModelKey={setSelectedModelKey}
-              renderMode={renderMode}
-              setRenderMode={setRenderMode}
+              calibration={calibration}
+              setCalibration={setCalibration}
             />
+          </SidebarPanel>
+
+          <SidebarPanel title="Zapis kalibracji i backend">
+            <div style={{ display: "grid", gap: 8 }}>
+              <button
+                type="button"
+                onClick={syncOutputStateToBackend}
+                disabled={isSavingOutputBackend}
+                style={
+                  isSavingOutputBackend
+                    ? { ...ui.button, opacity: 0.6, cursor: "not-allowed" }
+                    : ui.buttonPrimary
+                }
+              >
+                {isSavingOutputBackend
+                  ? "Zapisywanie outputu..."
+                  : "Zapisz output do backendu"}
+              </button>
+
+              <button
+                type="button"
+                onClick={saveCalibrationSnapshot}
+                disabled={isSavingSceneSnapshot}
+                style={
+                  isSavingSceneSnapshot
+                    ? { ...ui.button, opacity: 0.6, cursor: "not-allowed" }
+                    : ui.button
+                }
+              >
+                {isSavingSceneSnapshot
+                  ? "Zapisywanie kalibracji..."
+                  : "Zapisz kalibrację sceny"}
+              </button>
+
+              <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.5 }}>
+                1. Najpierw dopasuj maski w editorze / output.
+                <br />
+                2. Zapisz output do backendu, żeby zmiany były trwałe.
+                <br />
+                3. Zapisz kalibrację sceny, żeby wrócić do ustawień później.
+              </div>
+            </div>
+          </SidebarPanel>
+
+          <SidebarPanel title="Checklist przed mappingiem">
+            <div style={{ fontSize: 12, lineHeight: 1.65, opacity: 0.88 }}>
+              □ Wybrana poprawna fasada / model GLB
+              <br />
+              □ Output otwiera się na właściwym ekranie / projektorze
+              <br />
+              □ Tryb outputu ustawiony poprawnie: Plane / Light GLB / Full GLB
+              <br />
+              □ Projektor reaguje na offset, kąty i FOV
+              <br />
+              □ Kontury masek są widoczne i czytelne
+              <br />
+              □ Pulse wybranej maski działa
+              <br />
+              □ Solo wybranej maski działa
+              <br />
+              □ Blackout działa
+              <br />
+              □ Wideo / tekstury są wyświetlane poprawnie
+              <br />
+              □ Maski trafiają w okna / detale fasady
+              <br />
+              □ Zmiany z outputu zapisane do backendu
+              <br />
+              □ Kalibracja sceny zapisana
+            </div>
+          </SidebarPanel>
+
+          <SidebarPanel title="Skróty">
+            <div style={{ fontSize: 12, lineHeight: 1.6, opacity: 0.85 }}>
+              Editor:
+              <br />
+              Delete — usuń wybraną maskę
+              <br />
+              Ctrl + D — duplikuj maskę
+              <br />
+              Escape — reset / odznacz
+              <br />
+              G — pokaż / ukryj grid
+              <br />
+              [ / ] — zmień głębokość maski
+              <br />
+              Shift + strzałki — przesuń wybraną maskę
+              <br />
+              Alt + E — solo wybranej maski w editorze
+              <br />
+              PageUp / PageDown — poprzednia / następna maska
+              <br />
+              Home / End — pierwsza / ostatnia maska
+              <br />
+              <br />
+              Open Output:
+              <br />
+              Alt + Shift + strzałki — przesuń wybraną maskę
+              <br />
+              Alt + [ / ] — zIndex wybranej maski
+              <br />
+              Alt + S — solo wybranej maski
+              <br />
+              Alt + B — blackout
+            </div>
           </SidebarPanel>
 
           <SidebarPanel title="Zapisane sceny">
@@ -1228,7 +1971,7 @@ export default function ModelPage() {
                       <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
                         {new Date(preset.createdAt).toLocaleString()}
                       </div>
-                      <div style={{ display: "flex", gap: 8 }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button
                           type="button"
                           style={ui.button}
