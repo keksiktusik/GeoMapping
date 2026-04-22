@@ -39,68 +39,60 @@ function makeProjectorCamera(projector, aspect) {
   return cam;
 }
 
-function useProjectedMaterial(projectionTexture, projector, aspect, renderOrder = 0) {
-  return useMemo(() => {
-    if (!projectionTexture) return null;
+function createProjectedMaterial(texture, projector, aspect) {
+  if (!texture) return null;
 
-    const projectorCamera = makeProjectorCamera(projector, aspect);
+  const projectorCamera = makeProjectorCamera(projector, aspect);
 
-    const material = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      depthTest: true,
-      polygonOffset: true,
-      polygonOffsetFactor: -1 - renderOrder,
-      polygonOffsetUnits: -1 - renderOrder,
-      uniforms: {
-        baseTexture: { value: projectionTexture },
-        projectorViewMatrix: {
-          value: projectorCamera.matrixWorldInverse.clone()
-        },
-        projectorProjectionMatrix: {
-          value: projectorCamera.projectionMatrix.clone()
-        }
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      baseTexture: { value: texture },
+      projectorViewMatrix: {
+        value: projectorCamera.matrixWorldInverse.clone()
       },
-      vertexShader: `
-        varying vec3 vWorldPosition;
+      projectorProjectionMatrix: {
+        value: projectorCamera.projectionMatrix.clone()
+      }
+    },
+    vertexShader: `
+      varying vec3 vWorldPosition;
 
-        void main() {
-          vec4 worldPos = modelMatrix * vec4(position, 1.0);
-          vWorldPosition = worldPos.xyz;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D baseTexture;
-        uniform mat4 projectorViewMatrix;
-        uniform mat4 projectorProjectionMatrix;
+      void main() {
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPos.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D baseTexture;
+      uniform mat4 projectorViewMatrix;
+      uniform mat4 projectorProjectionMatrix;
 
-        varying vec3 vWorldPosition;
+      varying vec3 vWorldPosition;
 
-        void main() {
-          vec4 projectorClip =
-            projectorProjectionMatrix *
-            projectorViewMatrix *
-            vec4(vWorldPosition, 1.0);
+      void main() {
+        vec4 projectorClip =
+          projectorProjectionMatrix *
+          projectorViewMatrix *
+          vec4(vWorldPosition, 1.0);
 
-          if (projectorClip.w <= 0.0) discard;
+        if (projectorClip.w <= 0.0) discard;
 
-          vec3 ndc = projectorClip.xyz / projectorClip.w;
-          vec2 uv = ndc.xy * 0.5 + 0.5;
-          uv.y = 1.0 - uv.y;
+        vec3 ndc = projectorClip.xyz / projectorClip.w;
+        vec2 uv = ndc.xy * 0.5 + 0.5;
+        uv.y = 1.0 - uv.y;
 
-          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
 
-          vec4 color = texture2D(baseTexture, uv);
-          if (color.a < 0.01) discard;
+        vec4 color = texture2D(baseTexture, uv);
+        if (color.a < 0.01) discard;
 
-          gl_FragColor = color;
-        }
-      `
-    });
-
-    return material;
-  }, [projectionTexture, projector, aspect, renderOrder]);
+        gl_FragColor = color;
+      }
+    `
+  });
 }
 
 function ProjectorHelper({ projector }) {
@@ -120,56 +112,17 @@ function ProjectorHelper({ projector }) {
   );
 }
 
-function LayeredPlane({ textures, projector, depthOffsets }) {
-  const backMaterial = useProjectedMaterial(textures?.back, projector, 8 / 5, 0);
-  const middleMaterial = useProjectedMaterial(textures?.middle, projector, 8 / 5, 1);
-  const frontMaterial = useProjectedMaterial(textures?.front, projector, 8 / 5, 2);
-
-  useEffect(() => {
-    return () => {
-      backMaterial?.dispose?.();
-      middleMaterial?.dispose?.();
-      frontMaterial?.dispose?.();
-    };
-  }, [backMaterial, middleMaterial, frontMaterial]);
-
-  return (
-    <group>
-      <mesh position={[0, 0, 0]}>
-        <planeGeometry args={[8, 5]} />
-        <meshStandardMaterial color="#bfc7d4" />
-      </mesh>
-
-      {backMaterial && (
-        <mesh position={[0, 0, depthOffsets.back]} renderOrder={1}>
-          <planeGeometry args={[8, 5]} />
-          <primitive object={backMaterial} attach="material" />
-        </mesh>
-      )}
-
-      {middleMaterial && (
-        <mesh position={[0, 0, depthOffsets.middle]} renderOrder={2}>
-          <planeGeometry args={[8, 5]} />
-          <primitive object={middleMaterial} attach="material" />
-        </mesh>
-      )}
-
-      {frontMaterial && (
-        <mesh position={[0, 0, depthOffsets.front]} renderOrder={3}>
-          <planeGeometry args={[8, 5]} />
-          <primitive object={frontMaterial} attach="material" />
-        </mesh>
-      )}
-    </group>
-  );
-}
-
-function FittedLayeredGlbModel({
+function FittedProjectedModel({
   modelUrl,
   textures,
   projector,
-  depthOffsets,
-  showEdges = true
+  modelRotation = [0, 0, 0],
+  modelOffset = [0, 0, 0],
+  depthOffsets = {
+    front: 0.06,
+    middle: 0,
+    back: -0.06
+  }
 }) {
   const { scene } = useGLTF(modelUrl);
 
@@ -193,14 +146,25 @@ function FittedLayeredGlbModel({
   }, [scene]);
 
   const baseClone = useMemo(() => scene.clone(), [scene]);
-  const backClone = useMemo(() => scene.clone(), [scene]);
-  const middleClone = useMemo(() => scene.clone(), [scene]);
   const frontClone = useMemo(() => scene.clone(), [scene]);
+  const middleClone = useMemo(() => scene.clone(), [scene]);
+  const backClone = useMemo(() => scene.clone(), [scene]);
   const edgesClone = useMemo(() => scene.clone(), [scene]);
 
-  const backMaterial = useProjectedMaterial(textures?.back, projector, 8 / 5, 0);
-  const middleMaterial = useProjectedMaterial(textures?.middle, projector, 8 / 5, 1);
-  const frontMaterial = useProjectedMaterial(textures?.front, projector, 8 / 5, 2);
+  const frontMaterial = useMemo(
+    () => createProjectedMaterial(textures?.front, projector, 8 / 5),
+    [textures?.front, projector]
+  );
+
+  const middleMaterial = useMemo(
+    () => createProjectedMaterial(textures?.middle, projector, 8 / 5),
+    [textures?.middle, projector]
+  );
+
+  const backMaterial = useMemo(
+    () => createProjectedMaterial(textures?.back, projector, 8 / 5),
+    [textures?.back, projector]
+  );
 
   useEffect(() => {
     baseClone.traverse((obj) => {
@@ -208,111 +172,195 @@ function FittedLayeredGlbModel({
         obj.material = new THREE.MeshStandardMaterial({
           color: "#8e99a8",
           roughness: 0.9,
-          metalness: 0.05
+          metalness: 0.05,
+          transparent: true,
+          opacity: 1
         });
       }
     });
-
-    return () => {
-      baseClone.traverse((obj) => {
-        if (obj.isMesh) obj.material?.dispose?.();
-      });
-    };
   }, [baseClone]);
-
-  useEffect(() => {
-    if (!backMaterial) return;
-    backClone.traverse((obj) => {
-      if (obj.isMesh) obj.material = backMaterial;
-    });
-  }, [backClone, backMaterial]);
-
-  useEffect(() => {
-    if (!middleMaterial) return;
-    middleClone.traverse((obj) => {
-      if (obj.isMesh) obj.material = middleMaterial;
-    });
-  }, [middleClone, middleMaterial]);
 
   useEffect(() => {
     if (!frontMaterial) return;
     frontClone.traverse((obj) => {
       if (obj.isMesh) obj.material = frontMaterial;
     });
+    return () => frontMaterial.dispose();
   }, [frontClone, frontMaterial]);
 
   useEffect(() => {
-    return () => {
-      backMaterial?.dispose?.();
-      middleMaterial?.dispose?.();
-      frontMaterial?.dispose?.();
-    };
-  }, [backMaterial, middleMaterial, frontMaterial]);
+    if (!middleMaterial) return;
+    middleClone.traverse((obj) => {
+      if (obj.isMesh) obj.material = middleMaterial;
+    });
+    return () => middleMaterial.dispose();
+  }, [middleClone, middleMaterial]);
 
-  const basePos = [-fit.center.x, -fit.center.y, -fit.center.z];
+  useEffect(() => {
+    if (!backMaterial) return;
+    backClone.traverse((obj) => {
+      if (obj.isMesh) obj.material = backMaterial;
+    });
+    return () => backMaterial.dispose();
+  }, [backClone, backMaterial]);
+
+  const basePosition = [
+    -fit.center.x + Number(modelOffset?.[0] || 0),
+    -fit.center.y + Number(modelOffset?.[1] || 0),
+    -fit.center.z + Number(modelOffset?.[2] || 0)
+  ];
+
+  const frontPosition = [
+    basePosition[0],
+    basePosition[1],
+    basePosition[2] + Number(depthOffsets?.front || 0)
+  ];
+
+  const middlePosition = [
+    basePosition[0],
+    basePosition[1],
+    basePosition[2] + Number(depthOffsets?.middle || 0)
+  ];
+
+  const backPosition = [
+    basePosition[0],
+    basePosition[1],
+    basePosition[2] + Number(depthOffsets?.back || 0)
+  ];
 
   return (
     <group scale={[fit.scale, fit.scale, fit.scale]}>
-      <primitive object={baseClone} position={basePos} />
+      <primitive
+        object={baseClone}
+        position={basePosition}
+        rotation={modelRotation}
+      />
 
       {backMaterial && (
         <primitive
           object={backClone}
-          position={[basePos[0], basePos[1], basePos[2] + depthOffsets.back]}
-          renderOrder={1}
+          position={backPosition}
+          rotation={modelRotation}
         />
       )}
 
       {middleMaterial && (
         <primitive
           object={middleClone}
-          position={[basePos[0], basePos[1], basePos[2] + depthOffsets.middle]}
-          renderOrder={2}
+          position={middlePosition}
+          rotation={modelRotation}
         />
       )}
 
       {frontMaterial && (
         <primitive
           object={frontClone}
-          position={[basePos[0], basePos[1], basePos[2] + depthOffsets.front]}
-          renderOrder={3}
+          position={frontPosition}
+          rotation={modelRotation}
         />
       )}
 
-      {showEdges && (
-        <group position={basePos}>
-          {edgesClone.children.map((child, index) =>
-            child.isMesh ? (
-              <mesh
-                key={index}
-                geometry={child.geometry}
-                position={child.position}
-                rotation={child.rotation}
-                scale={child.scale}
-              >
-                <meshBasicMaterial transparent opacity={0} />
-                <Edges color="white" threshold={15} />
-              </mesh>
-            ) : null
-          )}
-        </group>
+      <group position={basePosition} rotation={modelRotation}>
+        {edgesClone.children.map((child, index) =>
+          child.isMesh ? (
+            <mesh
+              key={index}
+              geometry={child.geometry}
+              position={child.position}
+              rotation={child.rotation}
+              scale={child.scale}
+            >
+              <meshBasicMaterial transparent opacity={0} />
+              <Edges color="white" threshold={15} />
+            </mesh>
+          ) : null
+        )}
+      </group>
+    </group>
+  );
+}
+
+function PlaneProjected({
+  textures,
+  projector,
+  depthOffsets = {
+    front: 0.06,
+    middle: 0,
+    back: -0.06
+  }
+}) {
+  const frontMaterial = useMemo(
+    () => createProjectedMaterial(textures?.front, projector, 8 / 5),
+    [textures?.front, projector]
+  );
+
+  const middleMaterial = useMemo(
+    () => createProjectedMaterial(textures?.middle, projector, 8 / 5),
+    [textures?.middle, projector]
+  );
+
+  const backMaterial = useMemo(
+    () => createProjectedMaterial(textures?.back, projector, 8 / 5),
+    [textures?.back, projector]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (frontMaterial) frontMaterial.dispose();
+      if (middleMaterial) middleMaterial.dispose();
+      if (backMaterial) backMaterial.dispose();
+    };
+  }, [frontMaterial, middleMaterial, backMaterial]);
+
+  return (
+    <group>
+      <mesh position={[0, 0, 0]}>
+        <planeGeometry args={[8, 5]} />
+        <meshStandardMaterial color="#bfc7d4" />
+      </mesh>
+
+      {backMaterial && (
+        <mesh position={[0, 0, Number(depthOffsets?.back || 0)]}>
+          <planeGeometry args={[8, 5]} />
+          <primitive object={backMaterial} attach="material" />
+        </mesh>
+      )}
+
+      {middleMaterial && (
+        <mesh position={[0, 0, Number(depthOffsets?.middle || 0)]}>
+          <planeGeometry args={[8, 5]} />
+          <primitive object={middleMaterial} attach="material" />
+        </mesh>
+      )}
+
+      {frontMaterial && (
+        <mesh position={[0, 0, Number(depthOffsets?.front || 0)]}>
+          <planeGeometry args={[8, 5]} />
+          <primitive object={frontMaterial} attach="material" />
+        </mesh>
       )}
     </group>
   );
 }
 
-function SceneContent({
-  mode,
+export default function ProjectedSimpleScene({
+  mode = "plane",
   modelUrl,
+  modelRotation = [0, 0, 0],
+  modelOffset = [0, 0, 0],
   textures,
   projector,
-  depthOffsets,
-  showHelpers = true,
-  showGrid = true
+  depthOffsets = {
+    front: 0.06,
+    middle: 0,
+    back: -0.06
+  },
+  enableControls = false,
+  showHelpers = false,
+  showGrid = false
 }) {
   return (
     <>
-      <color attach="background" args={["black"]} />
       <ambientLight intensity={0.9} />
       <directionalLight position={[5, 5, 5]} intensity={1.2} />
       <directionalLight position={[-4, 2, 6]} intensity={0.8} />
@@ -331,49 +379,22 @@ function SceneContent({
       {showHelpers ? <ProjectorHelper projector={projector} /> : null}
 
       {mode === "glb" ? (
-        <FittedLayeredGlbModel
+        <FittedProjectedModel
           modelUrl={modelUrl}
           textures={textures}
           projector={projector}
+          modelRotation={modelRotation}
+          modelOffset={modelOffset}
           depthOffsets={depthOffsets}
-          showEdges={true}
         />
       ) : (
-        <LayeredPlane
+        <PlaneProjected
           textures={textures}
           projector={projector}
           depthOffsets={depthOffsets}
         />
       )}
-    </>
-  );
-}
 
-export default function ProjectedSimpleScene({
-  mode = "plane",
-  modelUrl,
-  textures,
-  projector,
-  depthOffsets = {
-    front: 0.06,
-    middle: 0,
-    back: -0.06
-  },
-  enableControls = true,
-  showHelpers = true,
-  showGrid = true
-}) {
-  return (
-    <>
-      <SceneContent
-        mode={mode}
-        modelUrl={modelUrl}
-        textures={textures}
-        projector={projector}
-        depthOffsets={depthOffsets}
-        showHelpers={showHelpers}
-        showGrid={showGrid}
-      />
       {enableControls ? <OrbitControls /> : null}
     </>
   );

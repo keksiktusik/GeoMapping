@@ -76,27 +76,58 @@ export default function ProjectionTexture({
     onTexture?.(asset.texture);
 
     let raf = 0;
+    let lastFrameTime = 0;
+    const FPS = 30;
+    const FRAME_MS = 1000 / FPS;
 
-    const loop = () => {
-      videoCache.current.forEach((entry) => {
-        if (entry?.video && !entry?.runtimeSettings?.paused) {
-          safePlay(entry.video);
-        }
-      });
+    const hasVideo = () => {
+      const allMasks = [...(masks || [])];
+      if (activeDraft?.textureType === "video") {
+        allMasks.push(activeDraft);
+      }
 
-      asset.redraw();
-      asset.texture.needsUpdate = true;
-      raf = requestAnimationFrame(loop);
+      return allMasks.some(
+        (m) =>
+          m?.visible !== false &&
+          m?.textureType === "video" &&
+          Array.isArray(m?.points) &&
+          m.points.length >= 3
+      );
     };
 
-    loop();
+    const loop = (now) => {
+      const containsVideo = hasVideo();
+
+      if (containsVideo && now - lastFrameTime >= FRAME_MS) {
+        videoCache.current.forEach((entry) => {
+          if (entry?.video && !entry?.runtimeSettings?.paused) {
+            safePlay(entry.video);
+          }
+        });
+
+        asset.redraw();
+        asset.texture.needsUpdate = true;
+        lastFrameTime = now;
+      }
+
+      if (containsVideo) {
+        raf = requestAnimationFrame(loop);
+      }
+    };
+
+    asset.redraw();
+    asset.texture.needsUpdate = true;
+
+    if (hasVideo()) {
+      raf = requestAnimationFrame(loop);
+    }
 
     return () => {
       cancelAnimationFrame(raf);
       asset.texture.dispose();
       onTexture?.(null);
     };
-  }, [asset, onTexture]);
+  }, [asset, onTexture, masks, activeDraft]);
 
   useEffect(() => {
     const reviveVideos = () => {

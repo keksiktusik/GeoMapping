@@ -23,13 +23,18 @@ const DEFAULT_CALIBRATION = {
   patternOpacity: 0.8,
   maskOutlineMode: "off",
   maskOutlineColor: "#ffffff",
-  maskOutlineWidth: 2,
+  maskOutlineWidth: 0.5,
   selectedMaskFlashMode: "off",
   selectedMaskFlashColor: "#ffea00",
   selectedMaskFlashSpeed: 1.6,
   selectedMaskSoloInOutput: false,
   outputBlackoutMode: false,
-  selectedMaskOutlineBoost: true
+  selectedMaskOutlineBoost: true,
+  operatorZoomEnabled: false,
+  operatorZoom: 2,
+  operatorPanX: 0,
+  operatorPanY: 0,
+  operatorPanelSize: 320
 };
 
 const PATTERN_OPTIONS = [
@@ -110,7 +115,7 @@ function normalizeCalibration(value = {}) {
       ? value.maskOutlineColor
       : DEFAULT_CALIBRATION.maskOutlineColor,
     maskOutlineWidth: Math.max(
-      1,
+      0.2,
       Math.min(12, Number(value?.maskOutlineWidth ?? DEFAULT_CALIBRATION.maskOutlineWidth))
     ),
     selectedMaskFlashMode,
@@ -123,7 +128,18 @@ function normalizeCalibration(value = {}) {
     ),
     selectedMaskSoloInOutput: Boolean(value?.selectedMaskSoloInOutput),
     outputBlackoutMode: Boolean(value?.outputBlackoutMode),
-    selectedMaskOutlineBoost: value?.selectedMaskOutlineBoost !== false
+    selectedMaskOutlineBoost: value?.selectedMaskOutlineBoost !== false,
+    operatorZoomEnabled: Boolean(value?.operatorZoomEnabled),
+    operatorZoom: Math.max(
+      1,
+      Math.min(6, Number(value?.operatorZoom ?? DEFAULT_CALIBRATION.operatorZoom))
+    ),
+    operatorPanX: clampNumber(value?.operatorPanX, DEFAULT_CALIBRATION.operatorPanX),
+    operatorPanY: clampNumber(value?.operatorPanY, DEFAULT_CALIBRATION.operatorPanY),
+    operatorPanelSize: Math.max(
+      220,
+      Math.min(520, Number(value?.operatorPanelSize ?? DEFAULT_CALIBRATION.operatorPanelSize))
+    )
   };
 }
 
@@ -164,6 +180,27 @@ export default function ProjectorSettings({
     setCalibration((prev) => ({
       ...normalizeCalibration(prev),
       [key]: value
+    }));
+  };
+
+  const nudgeCalibrationNumber = (key, delta, min = -Infinity, max = Infinity) => {
+    setCalibration((prev) => {
+      const safe = normalizeCalibration(prev);
+      return {
+        ...safe,
+        [key]: Math.max(min, Math.min(max, Number(safe?.[key] || 0) + delta))
+      };
+    });
+  };
+
+  const resetOperatorZoom = () => {
+    setCalibration((prev) => ({
+      ...normalizeCalibration(prev),
+      operatorZoomEnabled: false,
+      operatorZoom: DEFAULT_CALIBRATION.operatorZoom,
+      operatorPanX: DEFAULT_CALIBRATION.operatorPanX,
+      operatorPanY: DEFAULT_CALIBRATION.operatorPanY,
+      operatorPanelSize: DEFAULT_CALIBRATION.operatorPanelSize
     }));
   };
 
@@ -270,10 +307,11 @@ export default function ProjectorSettings({
           <RangeRow
             label="Grubość konturu"
             value={safeCalibration.maskOutlineWidth}
-            min={1}
+            min={0.2}
             max={12}
-            step={1}
+            step={0.1}
             onChange={(v) => updateCalibration("maskOutlineWidth", Number(v))}
+            decimals={1}
           />
 
           <SelectRow
@@ -297,7 +335,78 @@ export default function ProjectorSettings({
             max={6}
             step={0.1}
             onChange={(v) => updateCalibration("selectedMaskFlashSpeed", Number(v))}
+            decimals={1}
           />
+        </div>
+      </div>
+
+      <div
+        style={{
+          padding: 12,
+          border: "1px solid #2b3647",
+          borderRadius: 12,
+          background: "#121821"
+        }}
+      >
+        <div style={{ ...ui.label, marginBottom: 10 }}>Powiększenie operatorskie</div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <ToggleRow
+            label="Włącz panel zoom"
+            checked={safeCalibration.operatorZoomEnabled}
+            onChange={(v) => updateCalibration("operatorZoomEnabled", v)}
+          />
+
+          <RangeRow
+            label="Zoom panelu"
+            value={safeCalibration.operatorZoom}
+            min={1}
+            max={6}
+            step={0.1}
+            onChange={(v) => updateCalibration("operatorZoom", Number(v))}
+            decimals={1}
+          />
+
+          <RangeRow
+            label="Rozmiar panelu"
+            value={safeCalibration.operatorPanelSize}
+            min={220}
+            max={520}
+            step={10}
+            onChange={(v) => updateCalibration("operatorPanelSize", Number(v))}
+            decimals={0}
+          />
+
+          <FieldCompact
+            label="Pan X"
+            value={safeCalibration.operatorPanX}
+            step={10}
+            onChange={(v) => updateCalibration("operatorPanX", Number(v))}
+            onMinus={() => nudgeCalibrationNumber("operatorPanX", -20)}
+            onPlus={() => nudgeCalibrationNumber("operatorPanX", 20)}
+          />
+
+          <FieldCompact
+            label="Pan Y"
+            value={safeCalibration.operatorPanY}
+            step={10}
+            onChange={(v) => updateCalibration("operatorPanY", Number(v))}
+            onMinus={() => nudgeCalibrationNumber("operatorPanY", -20)}
+            onPlus={() => nudgeCalibrationNumber("operatorPanY", 20)}
+          />
+
+          <button
+            type="button"
+            onClick={resetOperatorZoom}
+            style={{
+              ...ui.button,
+              background: "#1e1e1e",
+              border: "1px solid #4b5563",
+              color: "#fff"
+            }}
+          >
+            Reset panelu zoom
+          </button>
         </div>
       </div>
 
@@ -426,6 +535,16 @@ export default function ProjectorSettings({
         Alt + S = solo wybranej maski
         <br />
         Alt + B = blackout mode
+        <br />
+        Alt + Z = panel zoom
+        <br />
+        Alt + = / - = zoom panelu
+        <br />
+        Alt + I / K = pan góra / dół
+        <br />
+        Alt + J / L = pan lewo / prawo
+        <br />
+        Alt + 0 = reset panelu zoom
       </div>
     </div>
   );
@@ -483,7 +602,7 @@ function SelectRow({ label, value, options, labels = {}, onChange }) {
   );
 }
 
-function RangeRow({ label, value, min, max, step, onChange }) {
+function RangeRow({ label, value, min, max, step, onChange, decimals = 1 }) {
   return (
     <label
       style={{
@@ -503,7 +622,7 @@ function RangeRow({ label, value, min, max, step, onChange }) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-      <span style={{ textAlign: "right" }}>{Number(value).toFixed(1)}</span>
+      <span style={{ textAlign: "right" }}>{Number(value).toFixed(decimals)}</span>
     </label>
   );
 }
@@ -535,6 +654,46 @@ function ColorRow({ label, value, onChange }) {
       />
       <span style={{ textAlign: "right" }}>{value}</span>
     </label>
+  );
+}
+
+function FieldCompact({ label, value, onChange, onMinus, onPlus, step = 1 }) {
+  return (
+    <div
+      style={{
+        padding: 10,
+        border: "1px solid #2b3647",
+        borderRadius: 10,
+        background: "#0f151d"
+      }}
+    >
+      <div
+        style={{
+          ...ui.label,
+          marginBottom: 8
+        }}
+      >
+        {label}: {Number(value ?? 0).toFixed(0)}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "36px 1fr 36px", gap: 8 }}>
+        <button type="button" onClick={onMinus} style={smallButtonStyle}>
+          -
+        </button>
+
+        <input
+          style={ui.input}
+          type="number"
+          step={step}
+          value={value ?? 0}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+        />
+
+        <button type="button" onClick={onPlus} style={smallButtonStyle}>
+          +
+        </button>
+      </div>
+    </div>
   );
 }
 

@@ -29,17 +29,21 @@ const MODEL_CONFIG = {
   mickiewicz: {
     label: "Szkoła im. Adama Mickiewicza",
     url: "/models/fasada.glb",
-    enabled: true
+    enabled: true,
+    offset: [0, 0, -20]
   },
   kolejowa: {
     label: "Fasada szkoły Kolejowej",
     url: "/models/fasada2.glb",
-    enabled: true
+    enabled: true,
+    offset: [0, 0, -20]
   },
   dworzec: {
     label: "Dworzec Główny",
     url: "/models/fasada3.glb",
-    enabled: true
+    enabled: true,
+    rotation: [0, -Math.PI / 2, 0],
+    offset: [0, 0, -450]
   }
 };
 
@@ -147,6 +151,90 @@ function offsetWarp(warp, dx, dy, wallW, wallH, cols = 4, rows = 4) {
   };
 }
 
+function getPolygonCenter(points = [], fallbackX = WALL_W / 2, fallbackY = WALL_H / 2) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return { x: fallbackX, y: fallbackY };
+  }
+
+  const sum = points.reduce(
+    (acc, p) => ({
+      x: acc.x + Number(p?.x || 0),
+      y: acc.y + Number(p?.y || 0)
+    }),
+    { x: 0, y: 0 }
+  );
+
+  return {
+    x: sum.x / points.length,
+    y: sum.y / points.length
+  };
+}
+
+function scalePointsAroundCenter(points, scale, wallW, wallH) {
+  const center = getPolygonCenter(points, wallW / 2, wallH / 2);
+
+  return (points || []).map((p) => ({
+    x: Math.max(
+      0,
+      Math.min(wallW, center.x + (Number(p?.x || 0) - center.x) * scale)
+    ),
+    y: Math.max(
+      0,
+      Math.min(wallH, center.y + (Number(p?.y || 0) - center.y) * scale)
+    )
+  }));
+}
+
+function scaleWarpAroundCenter(warp, scale, wallW, wallH, cols = 4, rows = 4) {
+  const mesh = ensureMeshWarp(warp, wallW, wallH, cols, rows);
+  const center = getPolygonCenter(mesh.points, wallW / 2, wallH / 2);
+
+  return {
+    ...mesh,
+    points: mesh.points.map((p) => ({
+      ...p,
+      x: Math.max(
+        0,
+        Math.min(wallW, center.x + (Number(p?.x || 0) - center.x) * scale)
+      ),
+      y: Math.max(
+        0,
+        Math.min(wallH, center.y + (Number(p?.y || 0) - center.y) * scale)
+      )
+    }))
+  };
+}
+
+function getMaskBounds(points = []) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return {
+      minX: 0,
+      minY: 0,
+      maxX: 0,
+      maxY: 0,
+      width: 0,
+      height: 0
+    };
+  }
+
+  const xs = points.map((p) => Number(p?.x || 0));
+  const ys = points.map((p) => Number(p?.y || 0));
+
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
+}
+
 function normalizeIncomingMasks(list) {
   return (Array.isArray(list) ? list : []).map((m) => ({
     ...m,
@@ -206,6 +294,8 @@ export default function ModelPage() {
 
   const selectedModelUrl = selectedModel.url;
   const selectedModelEnabled = selectedModel.enabled !== false;
+  const selectedModelRotation = selectedModel.rotation || [0, 0, 0];
+  const selectedModelOffset = selectedModel.offset || [0, 0, 0];
 
   const [outputSurfaceMode, setOutputSurfaceMode] = useState(() => {
     const mode = stored?.outputSurfaceMode;
@@ -626,8 +716,9 @@ export default function ModelPage() {
   const duplicateSelected = async () => {
     if (!canDuplicate) return;
 
-    const dx = 24;
-    const dy = 18;
+    const bounds = getMaskBounds(points);
+    const dx = Math.max(30, bounds.width + 20);
+    const dy = 0;
 
     const duplicatedPoints = offsetPoints(points, dx, dy, WALL_W, WALL_H);
     const duplicatedWarp = offsetWarp(
@@ -685,7 +776,7 @@ export default function ModelPage() {
       setIsClosed(true);
       setMode("edit");
 
-      alert("Utworzono kopię maski.");
+      alert("Utworzono kopię maski obok oryginału.");
     } catch (e) {
       console.error(e);
       alert("Nie udało się zduplikować maski.");
@@ -869,6 +960,41 @@ export default function ModelPage() {
     await patchMaskLocal(selectedMaskId, {
       points: movedPoints,
       localWarp: movedWarp
+    });
+  };
+
+  const scaleSelectedMask = async (scaleFactor) => {
+    if (selectedMaskId === null) return;
+
+    const current = masks.find((m) => m.id === selectedMaskId);
+    if (!current) return;
+
+    const scaledPoints = scalePointsAroundCenter(
+      Array.isArray(current.points) ? current.points : [],
+      scaleFactor,
+      WALL_W,
+      WALL_H
+    );
+
+    const scaledWarp = scaleWarpAroundCenter(
+      maskWarps[selectedMaskId] || current.localWarp,
+      scaleFactor,
+      WALL_W,
+      WALL_H,
+      4,
+      4
+    );
+
+    setPoints(scaledPoints);
+
+    setMaskWarps((prev) => ({
+      ...prev,
+      [selectedMaskId]: scaledWarp
+    }));
+
+    await patchMaskLocal(selectedMaskId, {
+      points: scaledPoints,
+      localWarp: scaledWarp
     });
   };
 
@@ -1095,6 +1221,8 @@ export default function ModelPage() {
   const loadScenePreset = async (preset) => {
     if (!preset) return;
 
+    resetDraft();
+
     setSelectedModelKey(preset.selectedModelKey || "mickiewicz");
     setRenderMode(preset.renderMode || "glb");
     setOutputSurfaceMode(preset.outputSurfaceMode || "lightGlb");
@@ -1114,8 +1242,14 @@ export default function ModelPage() {
     setShowPinkBackground(preset.showPinkBackground !== false);
     setEditorSoloSelected(Boolean(preset.editorSoloSelected));
 
-    if (preset.selectedMaskId != null) {
-      setSelectedMaskId(preset.selectedMaskId);
+    const presetMaskIds = new Set((preset.masks || []).map((m) => String(m.id)));
+
+    for (const currentMask of masks) {
+      if (!presetMaskIds.has(String(currentMask.id))) {
+        await patchMaskLocal(currentMask.id, {
+          visible: false
+        });
+      }
     }
 
     for (const saved of preset.masks || []) {
@@ -1132,6 +1266,19 @@ export default function ModelPage() {
         textureValue: saved.textureValue,
         layerName: saved.layerName
       });
+    }
+
+    if (preset.selectedMaskId != null) {
+      const selectedExists = masks.find(
+        (m) => String(m.id) === String(preset.selectedMaskId)
+      );
+      if (selectedExists) {
+        handleSelectMask(preset.selectedMaskId);
+      } else {
+        setSelectedMaskId(null);
+      }
+    } else {
+      setSelectedMaskId(null);
     }
   };
 
@@ -1179,6 +1326,8 @@ export default function ModelPage() {
           selectedMaskId: selectedMaskId ?? "__draft__",
           renderMode,
           selectedModelKey,
+          selectedModelRotation,
+          selectedModelOffset,
           outputSurfaceMode,
           outputModelUrl,
           draft: {
@@ -1218,6 +1367,8 @@ export default function ModelPage() {
     calibration,
     renderMode,
     selectedModelKey,
+    selectedModelRotation,
+    selectedModelOffset,
     outputSurfaceMode,
     outputModelUrl,
     selectedMaskId,
@@ -1278,7 +1429,11 @@ export default function ModelPage() {
           setMaskName(selectedMask.name || "");
           setMaskType(selectedMask.type || "window");
           setOperation(normalizeMaskOperation(selectedMask.type, selectedMask.operation));
-          setZIndex(typeof selectedMask.zIndex === "number" ? selectedMask.zIndex : Number(selectedMask.zIndex || 0));
+          setZIndex(
+            typeof selectedMask.zIndex === "number"
+              ? selectedMask.zIndex
+              : Number(selectedMask.zIndex || 0)
+          );
           setVisible(selectedMask.visible !== false);
           setLocked(Boolean(selectedMask.locked));
           setLayerName(selectedMask.layerName || "default");
@@ -1431,6 +1586,18 @@ export default function ModelPage() {
         return;
       }
 
+      if (e.key === "," && selectedMaskId !== null) {
+        e.preventDefault();
+        await scaleSelectedMask(0.9);
+        return;
+      }
+
+      if (e.key === "." && selectedMaskId !== null) {
+        e.preventDefault();
+        await scaleSelectedMask(1.1);
+        return;
+      }
+
       if (e.shiftKey && selectedMaskId !== null) {
         const step = 2;
 
@@ -1579,7 +1746,7 @@ export default function ModelPage() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr",
+                gridTemplateColumns: "1fr 1fr",
                 gap: 8,
                 marginTop: 12
               }}
@@ -1590,11 +1757,42 @@ export default function ModelPage() {
                 disabled={!canDuplicate}
                 style={
                   canDuplicate
+                    ? { ...ui.button, gridColumn: "1 / span 2" }
+                    : {
+                        ...ui.button,
+                        gridColumn: "1 / span 2",
+                        opacity: 0.5,
+                        cursor: "not-allowed"
+                      }
+                }
+              >
+                Duplikuj wybraną maskę
+              </button>
+
+              <button
+                type="button"
+                onClick={() => scaleSelectedMask(0.9)}
+                disabled={selectedMaskId === null}
+                style={
+                  selectedMaskId !== null
                     ? ui.button
                     : { ...ui.button, opacity: 0.5, cursor: "not-allowed" }
                 }
               >
-                Duplikuj wybraną maskę
+                Zmniejsz 10%
+              </button>
+
+              <button
+                type="button"
+                onClick={() => scaleSelectedMask(1.1)}
+                disabled={selectedMaskId === null}
+                style={
+                  selectedMaskId !== null
+                    ? ui.button
+                    : { ...ui.button, opacity: 0.5, cursor: "not-allowed" }
+                }
+              >
+                Powiększ 10%
               </button>
             </div>
           </SidebarPanel>
@@ -1634,8 +1832,10 @@ export default function ModelPage() {
                   mask.textureValue
                 );
 
-                const dx = 24;
-                const dy = 18;
+                const bounds = getMaskBounds(Array.isArray(mask.points) ? mask.points : []);
+                const dx = Math.max(30, bounds.width + 20);
+                const dy = 0;
+
                 const duplicatedPoints = offsetPoints(
                   Array.isArray(mask.points) ? mask.points : [],
                   dx,
@@ -1643,6 +1843,7 @@ export default function ModelPage() {
                   WALL_W,
                   WALL_H
                 );
+
                 const duplicatedWarp = offsetWarp(
                   maskWarps[id] || mask.localWarp,
                   dx,
@@ -1688,6 +1889,8 @@ export default function ModelPage() {
                       4
                     )
                   }));
+
+                  handleSelectMask(created.id);
                 } catch (e) {
                   console.error(e);
                   alert("Nie udało się zduplikować maski.");
@@ -1699,64 +1902,88 @@ export default function ModelPage() {
         </div>
 
         <div style={ui.center}>
-          <SidebarPanel title="Podgląd 3D">
-            <div
-              style={{
-                position: "relative",
-                width: "100%",
-                minHeight: 420
-              }}
-            >
-              <WallScene
-                renderMode={renderMode}
-                modelUrl={selectedModelUrl}
-                points={hasPolygon ? points : []}
-                opacity={opacity}
-                showGrid={showGrid}
-                warp={warp}
-                wallW={WALL_W}
-                wallH={WALL_H}
-                projectionTexture={projectionTexture}
-                projector={projector}
-              />
+  <SidebarPanel title="Podgląd 3D">
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        minHeight: 420
+      }}
+    >
+      <WallScene
+        renderMode={renderMode}
+        modelUrl={selectedModelUrl}
+        modelRotation={selectedModelRotation}
+        modelOffset={selectedModelOffset}
+        points={hasPolygon ? points : []}
+        opacity={opacity}
+        showGrid={showGrid}
+        warp={warp}
+        wallW={WALL_W}
+        wallH={WALL_H}
+        projectionTexture={projectionTexture}
+        projector={projector}
+      />
 
-              <div
-                onPointerDown={handlePreviewPick}
-                title="Kliknij maskę na podglądzie, aby ją wybrać"
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  cursor: "crosshair",
-                  background: "transparent"
-                }}
-              />
-            </div>
-          </SidebarPanel>
+      <div
+        onPointerDown={handlePreviewPick}
+        title="Kliknij maskę na podglądzie, aby ją wybrać"
+        style={{
+          position: "absolute",
+          inset: 0,
+          cursor: "crosshair",
+          background: "transparent"
+        }}
+      />
+    </div>
+  </SidebarPanel>
 
-          <SidebarPanel title="Edytor rysowania">
-            <CanvasEditor
-              points={points}
-              setPoints={setPoints}
-              isClosed={isClosed}
-              setIsClosed={setIsClosed}
-              wallW={WALL_W}
-              wallH={WALL_H}
-              mode={mode}
-              setMode={setMode}
-              showGrid={showGrid}
-              opacity={opacity}
-            />
-          </SidebarPanel>
+  <SidebarPanel title="Edytor rysowania">
+    <CanvasEditor
+      points={points}
+      setPoints={setPoints}
+      isClosed={isClosed}
+      setIsClosed={setIsClosed}
+      wallW={WALL_W}
+      wallH={WALL_H}
+      mode={mode}
+      setMode={setMode}
+      showGrid={showGrid}
+      opacity={opacity}
+    />
+  </SidebarPanel>
 
-          <SidebarPanel title="Globalny warp">
-            <WarpEditor
-              wallW={WALL_W}
-              wallH={WALL_H}
-              warp={warp}
-              setWarp={setWarp}
-            />
-          </SidebarPanel>
-        </div>
+  <SidebarPanel title="Globalny warp">
+    <WarpEditor
+      wallW={WALL_W}
+      wallH={WALL_H}
+      warp={warp}
+      setWarp={setWarp}
+    />
+  </SidebarPanel>
+
+  <SidebarPanel title="Warp wybranej maski">
+    {selectedMaskId === null ? (
+      <div
+        style={{
+          fontSize: 12,
+          opacity: 0.72,
+          lineHeight: 1.5
+        }}
+      >
+        Wybierz maskę z listy albo kliknij ją na podglądzie 3D,
+        żeby edytować jej lokalny warp.
+      </div>
+    ) : (
+      <WarpEditor
+        wallW={WALL_W}
+        wallH={WALL_H}
+        warp={selectedOrDraftLocalWarp}
+        setWarp={setSelectedOrDraftLocalWarp}
+      />
+    )}
+  </SidebarPanel>
+</div>
 
         <div style={ui.sidebarRight}>
           <SidebarPanel title="Model i output">
@@ -1916,6 +2143,8 @@ export default function ModelPage() {
               [ / ] — zmień głębokość maski
               <br />
               Shift + strzałki — przesuń wybraną maskę
+              <br />
+              , / . — zmniejsz / powiększ wybraną maskę
               <br />
               Alt + E — solo wybranej maski w editorze
               <br />

@@ -16,13 +16,18 @@ const DEFAULT_CALIBRATION = {
   patternOpacity: 0.8,
   maskOutlineMode: "off",
   maskOutlineColor: "#ffffff",
-  maskOutlineWidth: 2,
+  maskOutlineWidth: 0.5,
   selectedMaskFlashMode: "off",
   selectedMaskFlashColor: "#ffea00",
   selectedMaskFlashSpeed: 1.6,
   selectedMaskSoloInOutput: false,
   outputBlackoutMode: false,
-  selectedMaskOutlineBoost: true
+  selectedMaskOutlineBoost: true,
+  operatorZoomEnabled: false,
+  operatorZoom: 2,
+  operatorPanX: 0,
+  operatorPanY: 0,
+  operatorPanelSize: 320
 };
 
 const PATTERN_KEYS = ["none", "frame", "checkerboard", "windows", "bands", "cross"];
@@ -102,7 +107,7 @@ function normalizeCalibration(calibration = {}) {
       ? calibration.maskOutlineColor
       : DEFAULT_CALIBRATION.maskOutlineColor,
     maskOutlineWidth: Math.max(
-      1,
+      0.2,
       Math.min(12, Number(calibration?.maskOutlineWidth ?? DEFAULT_CALIBRATION.maskOutlineWidth))
     ),
     selectedMaskFlashMode: FLASH_MODE_KEYS.includes(calibration?.selectedMaskFlashMode)
@@ -117,8 +122,44 @@ function normalizeCalibration(calibration = {}) {
     ),
     selectedMaskSoloInOutput: Boolean(calibration?.selectedMaskSoloInOutput),
     outputBlackoutMode: Boolean(calibration?.outputBlackoutMode),
-    selectedMaskOutlineBoost: calibration?.selectedMaskOutlineBoost !== false
+    selectedMaskOutlineBoost: calibration?.selectedMaskOutlineBoost !== false,
+    operatorZoomEnabled: Boolean(calibration?.operatorZoomEnabled),
+    operatorZoom: Math.max(
+      1,
+      Math.min(6, Number(calibration?.operatorZoom ?? DEFAULT_CALIBRATION.operatorZoom))
+    ),
+    operatorPanX: Number(calibration?.operatorPanX || 0),
+    operatorPanY: Number(calibration?.operatorPanY || 0),
+    operatorPanelSize: Math.max(
+      220,
+      Math.min(520, Number(calibration?.operatorPanelSize ?? DEFAULT_CALIBRATION.operatorPanelSize))
+    )
   };
+}
+
+function normalizeVector3(value, fallback = [0, 0, 0]) {
+  if (!Array.isArray(value) || value.length < 3) return fallback;
+  return [
+    Number(value[0] || 0),
+    Number(value[1] || 0),
+    Number(value[2] || 0)
+  ];
+}
+
+function getOutputCameraPosition(modelRotation = [0, 0, 0]) {
+  const ry = Number(modelRotation?.[1] || 0);
+  const quarterTurn = Math.PI / 2;
+  const epsilon = 0.001;
+
+  if (Math.abs(Math.abs(ry) - quarterTurn) < epsilon) {
+    return [10, 0, 0];
+  }
+
+  if (Math.abs(Math.abs(ry) - Math.PI) < epsilon) {
+    return [0, 0, -8];
+  }
+
+  return [0, 0, 8];
 }
 
 function updateStoredState(updater) {
@@ -318,7 +359,7 @@ function getSelectedMaskMeta(parsed) {
   if (!selectedId || selectedId === "__draft__") {
     return {
       total,
-      index: selectedId === "__draft__" ? null : null,
+      index: null,
       label: selectedId === "__draft__" ? "Draft" : "Brak wyboru"
     };
   }
@@ -340,33 +381,41 @@ function getSelectedMaskMeta(parsed) {
   };
 }
 
-function OutputCalibrationOverlay({ projector, calibration, selectedMaskId, selectedMeta }) {
+function OutputCalibrationOverlay({
+  projector,
+  calibration,
+  selectedMaskId,
+  selectedMeta,
+  compact = false
+}) {
   if (!calibration?.showOverlay) return null;
 
   return (
     <>
-      {calibration?.showGrid ? <GridOverlay /> : null}
-      {calibration?.showCrosshair ? <CrosshairOverlay /> : null}
+      {calibration?.showGrid ? <GridOverlay compact={compact} /> : null}
+      {calibration?.showCrosshair ? <CrosshairOverlay compact={compact} /> : null}
       {calibration?.pattern !== "none" ? (
         <PatternOverlay
           pattern={calibration.pattern}
           opacity={calibration.patternOpacity}
+          compact={compact}
         />
       ) : null}
-      {selectedMeta ? <SelectedMaskBadge selectedMeta={selectedMeta} /> : null}
+      {selectedMeta ? <SelectedMaskBadge selectedMeta={selectedMeta} compact={compact} /> : null}
       {calibration?.showInfo ? (
         <InfoOverlay
           projector={projector}
           calibration={calibration}
           selectedMaskId={selectedMaskId}
           selectedMeta={selectedMeta}
+          compact={compact}
         />
       ) : null}
     </>
   );
 }
 
-function GridOverlay() {
+function GridOverlay({ compact = false }) {
   const lines = [];
 
   for (let i = 1; i < 10; i += 1) {
@@ -381,7 +430,7 @@ function GridOverlay() {
           top: 0,
           bottom: 0,
           width: 1,
-          background: "rgba(255,255,255,0.14)"
+          background: compact ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.14)"
         }}
       />
     );
@@ -395,7 +444,7 @@ function GridOverlay() {
           left: 0,
           right: 0,
           height: 1,
-          background: "rgba(255,255,255,0.14)"
+          background: compact ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.14)"
         }}
       />
     );
@@ -407,7 +456,9 @@ function GridOverlay() {
         style={{
           position: "absolute",
           inset: 0,
-          border: "2px solid rgba(255,255,255,0.25)",
+          border: compact
+            ? "1px solid rgba(255,255,255,0.18)"
+            : "2px solid rgba(255,255,255,0.25)",
           boxSizing: "border-box"
         }}
       />
@@ -416,7 +467,7 @@ function GridOverlay() {
   );
 }
 
-function CrosshairOverlay() {
+function CrosshairOverlay({ compact = false }) {
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
       <div
@@ -444,8 +495,8 @@ function CrosshairOverlay() {
           position: "absolute",
           left: "50%",
           top: "50%",
-          width: 14,
-          height: 14,
+          width: compact ? 10 : 14,
+          height: compact ? 10 : 14,
           transform: "translate(-50%, -50%)",
           border: "1px solid rgba(255,80,80,0.95)",
           borderRadius: "50%"
@@ -627,7 +678,7 @@ function frameRect(left, top, width, height, borderWidth = 2) {
   };
 }
 
-function SelectedMaskBadge({ selectedMeta }) {
+function SelectedMaskBadge({ selectedMeta, compact = false }) {
   const counter =
     selectedMeta?.index != null && selectedMeta?.total != null
       ? `${selectedMeta.index} / ${selectedMeta.total}`
@@ -639,23 +690,23 @@ function SelectedMaskBadge({ selectedMeta }) {
     <div
       style={{
         position: "absolute",
-        top: 12,
-        right: 12,
-        maxWidth: 320,
-        padding: "10px 12px",
+        top: compact ? 8 : 12,
+        right: compact ? 8 : 12,
+        maxWidth: compact ? 180 : 320,
+        padding: compact ? "6px 8px" : "10px 12px",
         borderRadius: 10,
         background: "rgba(0,0,0,0.7)",
         color: "#fff",
-        fontSize: 12,
+        fontSize: compact ? 10 : 12,
         lineHeight: 1.4,
         pointerEvents: "none",
         textAlign: "right"
       }}
     >
-      <div style={{ fontSize: 11, opacity: 0.75, marginBottom: 2 }}>
+      <div style={{ fontSize: compact ? 9 : 11, opacity: 0.75, marginBottom: 2 }}>
         Wybrana maska
       </div>
-      <div style={{ fontWeight: 700, fontSize: 13 }}>
+      <div style={{ fontWeight: 700, fontSize: compact ? 11 : 13 }}>
         {selectedMeta?.label || "Brak wyboru"}
       </div>
       {counter ? (
@@ -667,7 +718,7 @@ function SelectedMaskBadge({ selectedMeta }) {
   );
 }
 
-function InfoOverlay({ projector, calibration, selectedMaskId, selectedMeta }) {
+function InfoOverlay({ projector, calibration, selectedMaskId, selectedMeta, compact = false }) {
   const patternLabels = {
     none: "Brak",
     frame: "Ramka",
@@ -701,13 +752,13 @@ function InfoOverlay({ projector, calibration, selectedMaskId, selectedMeta }) {
     <div
       style={{
         position: "absolute",
-        top: 12,
-        left: 12,
-        padding: "10px 12px",
+        top: compact ? 8 : 12,
+        left: compact ? 8 : 12,
+        padding: compact ? "6px 8px" : "10px 12px",
         borderRadius: 10,
         background: "rgba(0,0,0,0.6)",
         color: "#fff",
-        fontSize: 12,
+        fontSize: compact ? 9 : 12,
         lineHeight: 1.45,
         pointerEvents: "none",
         whiteSpace: "pre-line"
@@ -728,6 +779,196 @@ Blackout: ${calibration.outputBlackoutMode ? "Tak" : "Nie"}
 Selected ID: ${selectedMaskId ?? "-"}
 Maska: ${selectedMeta?.label || "-"}
 Pozycja: ${counter}`}
+    </div>
+  );
+}
+
+function HiddenProjectionTextures({
+  wallW,
+  wallH,
+  frontMasks,
+  middleMasks,
+  backMasks,
+  finalFrontDraft,
+  finalMiddleDraft,
+  finalBackDraft,
+  globalWarp,
+  contourProps,
+  setFrontTexture,
+  setMiddleTexture,
+  setBackTexture
+}) {
+  return (
+    <>
+      <ProjectionTexture
+        wallW={wallW}
+        wallH={wallH}
+        showGrid={false}
+        showPinkBackground={false}
+        masks={frontMasks}
+        activeDraft={finalFrontDraft}
+        finalWarp={globalWarp}
+        onTexture={setFrontTexture}
+        {...contourProps}
+      />
+
+      <ProjectionTexture
+        wallW={wallW}
+        wallH={wallH}
+        showGrid={false}
+        showPinkBackground={false}
+        masks={middleMasks}
+        activeDraft={finalMiddleDraft}
+        finalWarp={globalWarp}
+        onTexture={setMiddleTexture}
+        {...contourProps}
+      />
+
+      <ProjectionTexture
+        wallW={wallW}
+        wallH={wallH}
+        showGrid={false}
+        showPinkBackground={false}
+        masks={backMasks}
+        activeDraft={finalBackDraft}
+        finalWarp={globalWarp}
+        onTexture={setBackTexture}
+        {...contourProps}
+      />
+    </>
+  );
+}
+
+function OutputStage({
+  wallW,
+  wallH,
+  calibration,
+  selectedMaskId,
+  selectedMeta,
+  projector,
+  mode,
+  modelUrl,
+  modelRotation,
+  modelOffset,
+  outputCameraPosition,
+  textures,
+  compact = false
+}) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        background: calibration.outputBlackoutMode ? "#000000" : "black",
+        position: "relative",
+        overflow: "hidden"
+      }}
+    >
+      <Canvas
+        camera={{
+          position: outputCameraPosition,
+          fov: 45
+        }}
+      >
+        <ProjectedSimpleScene
+          mode={mode}
+          modelUrl={modelUrl}
+          modelRotation={modelRotation}
+          modelOffset={modelOffset}
+          textures={textures}
+          projector={projector}
+          depthOffsets={{
+            front: 0.06,
+            middle: 0,
+            back: -0.06
+          }}
+          enableControls={false}
+          showHelpers={false}
+          showGrid={false}
+        />
+      </Canvas>
+
+      <OutputCalibrationOverlay
+        projector={projector}
+        calibration={calibration}
+        selectedMaskId={selectedMaskId}
+        selectedMeta={selectedMeta}
+        compact={compact}
+      />
+    </div>
+  );
+}
+
+function OperatorZoomPanel({
+  enabled,
+  panelSize,
+  zoom,
+  panX,
+  panY,
+  stageProps
+}) {
+  if (!enabled) return null;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        right: 18,
+        bottom: 18,
+        width: panelSize,
+        height: panelSize,
+        borderRadius: 14,
+        overflow: "hidden",
+        border: "1px solid rgba(255,255,255,0.18)",
+        background: "rgba(7,10,16,0.92)",
+        boxShadow: "0 14px 32px rgba(0,0,0,0.45)",
+        zIndex: 50,
+        pointerEvents: "none"
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          top: 10,
+          left: 10,
+          right: 10,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          zIndex: 2,
+          color: "#fff",
+          fontSize: 11,
+          fontWeight: 700,
+          background: "rgba(0,0,0,0.5)",
+          padding: "6px 8px",
+          borderRadius: 8
+        }}
+      >
+        <span>Zoom operatorski</span>
+        <span>x{Number(zoom).toFixed(1)}</span>
+      </div>
+
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          overflow: "hidden"
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: "50%",
+            width: "100vw",
+            height: "100vh",
+            transform: `translate(-50%, -50%) translate(${panX}px, ${panY}px) scale(${zoom})`,
+            transformOrigin: "center center"
+          }}
+        >
+          <OutputStage {...stageProps} compact />
+        </div>
+      </div>
     </div>
   );
 }
@@ -771,6 +1012,18 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
   const calibration = normalizeCalibration(state?.calibration || {});
   const projector = normalizeProjector(state?.projector || {});
   const selectedMeta = useMemo(() => getSelectedMaskMeta(state || {}), [state]);
+  const modelRotation = useMemo(
+    () => normalizeVector3(state?.selectedModelRotation || [0, 0, 0]),
+    [state]
+  );
+  const modelOffset = useMemo(
+    () => normalizeVector3(state?.selectedModelOffset || [0, 0, 0]),
+    [state]
+  );
+  const outputCameraPosition = useMemo(
+    () => getOutputCameraPosition(modelRotation),
+    [modelRotation]
+  );
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -810,6 +1063,82 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
 
         if (e.key === "End") {
           selectStoredMaskEdge("last");
+          e.preventDefault();
+          return;
+        }
+
+        if (e.key.toLowerCase() === "z") {
+          updateStoredCalibration((prev) => ({
+            ...prev,
+            operatorZoomEnabled: !prev?.operatorZoomEnabled
+          }));
+          e.preventDefault();
+          return;
+        }
+
+        if (e.key === "=" || e.key === "+") {
+          updateStoredCalibration((prev) => ({
+            ...prev,
+            operatorZoom: Math.min(6, Number(prev?.operatorZoom || 1) + 0.1)
+          }));
+          e.preventDefault();
+          return;
+        }
+
+        if (e.key === "-" || e.key === "_") {
+          updateStoredCalibration((prev) => ({
+            ...prev,
+            operatorZoom: Math.max(1, Number(prev?.operatorZoom || 1) - 0.1)
+          }));
+          e.preventDefault();
+          return;
+        }
+
+        if (e.key === "0") {
+          updateStoredCalibration((prev) => ({
+            ...prev,
+            operatorZoomEnabled: false,
+            operatorZoom: DEFAULT_CALIBRATION.operatorZoom,
+            operatorPanX: DEFAULT_CALIBRATION.operatorPanX,
+            operatorPanY: DEFAULT_CALIBRATION.operatorPanY,
+            operatorPanelSize: DEFAULT_CALIBRATION.operatorPanelSize
+          }));
+          e.preventDefault();
+          return;
+        }
+
+        if (e.key.toLowerCase() === "i") {
+          updateStoredCalibration((prev) => ({
+            ...prev,
+            operatorPanY: Number(prev?.operatorPanY || 0) - 20
+          }));
+          e.preventDefault();
+          return;
+        }
+
+        if (e.key.toLowerCase() === "k") {
+          updateStoredCalibration((prev) => ({
+            ...prev,
+            operatorPanY: Number(prev?.operatorPanY || 0) + 20
+          }));
+          e.preventDefault();
+          return;
+        }
+
+        if (e.key.toLowerCase() === "j") {
+          updateStoredCalibration((prev) => ({
+            ...prev,
+            operatorPanX: Number(prev?.operatorPanX || 0) - 20
+          }));
+          e.preventDefault();
+          return;
+        }
+
+        if (e.key.toLowerCase() === "l") {
+          updateStoredCalibration((prev) => ({
+            ...prev,
+            operatorPanX: Number(prev?.operatorPanX || 0) + 20
+          }));
           e.preventDefault();
           return;
         }
@@ -914,30 +1243,7 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
           updateStoredProjector((prev) => ({ ...prev, distance: Number(prev?.distance || 0) - moveStep }));
           break;
         case "+":
-        case "=":
           updateStoredProjector((prev) => ({ ...prev, fov: Number(prev?.fov || 45) + 1 }));
-          break;
-        case "-":
-        case "_":
-          updateStoredProjector((prev) => ({ ...prev, fov: Number(prev?.fov || 45) - 1 }));
-          break;
-        case "1":
-          updateStoredCalibration((prev) => ({ ...prev, pattern: "none" }));
-          break;
-        case "2":
-          updateStoredCalibration((prev) => ({ ...prev, pattern: "frame" }));
-          break;
-        case "3":
-          updateStoredCalibration((prev) => ({ ...prev, pattern: "checkerboard" }));
-          break;
-        case "4":
-          updateStoredCalibration((prev) => ({ ...prev, pattern: "windows" }));
-          break;
-        case "5":
-          updateStoredCalibration((prev) => ({ ...prev, pattern: "bands" }));
-          break;
-        case "6":
-          updateStoredCalibration((prev) => ({ ...prev, pattern: "cross" }));
           break;
         default:
           handled = false;
@@ -1011,6 +1317,25 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
     selectedMaskOutlineBoost: calibration.selectedMaskOutlineBoost
   };
 
+  const stageProps = {
+    wallW,
+    wallH,
+    calibration,
+    selectedMaskId,
+    selectedMeta,
+    projector,
+    mode,
+    modelUrl: state?.outputModelUrl || "/models/fasada.glb",
+    modelRotation,
+    modelOffset,
+    outputCameraPosition,
+    textures: {
+      front: frontTexture,
+      middle: middleTexture,
+      back: backTexture
+    }
+  };
+
   return (
     <div
       style={{
@@ -1021,68 +1346,31 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
         overflow: "hidden"
       }}
     >
-      <ProjectionTexture
+      <HiddenProjectionTextures
         wallW={wallW}
         wallH={wallH}
-        showGrid={false}
-        showPinkBackground={false}
-        masks={frontMasks}
-        activeDraft={finalFrontDraft}
-        finalWarp={globalWarp}
-        onTexture={setFrontTexture}
-        {...contourProps}
+        frontMasks={frontMasks}
+        middleMasks={middleMasks}
+        backMasks={backMasks}
+        finalFrontDraft={finalFrontDraft}
+        finalMiddleDraft={finalMiddleDraft}
+        finalBackDraft={finalBackDraft}
+        globalWarp={globalWarp}
+        contourProps={contourProps}
+        setFrontTexture={setFrontTexture}
+        setMiddleTexture={setMiddleTexture}
+        setBackTexture={setBackTexture}
       />
 
-      <ProjectionTexture
-        wallW={wallW}
-        wallH={wallH}
-        showGrid={false}
-        showPinkBackground={false}
-        masks={middleMasks}
-        activeDraft={finalMiddleDraft}
-        finalWarp={globalWarp}
-        onTexture={setMiddleTexture}
-        {...contourProps}
-      />
+      <OutputStage {...stageProps} />
 
-      <ProjectionTexture
-        wallW={wallW}
-        wallH={wallH}
-        showGrid={false}
-        showPinkBackground={false}
-        masks={backMasks}
-        activeDraft={finalBackDraft}
-        finalWarp={globalWarp}
-        onTexture={setBackTexture}
-        {...contourProps}
-      />
-
-      <Canvas camera={{ position: [0, 0, 8], fov: 45 }}>
-        <ProjectedSimpleScene
-          mode={mode}
-          modelUrl={state?.outputModelUrl || "/models/fasada.glb"}
-          textures={{
-            front: frontTexture,
-            middle: middleTexture,
-            back: backTexture
-          }}
-          projector={projector}
-          depthOffsets={{
-            front: 0.06,
-            middle: 0,
-            back: -0.06
-          }}
-          enableControls={false}
-          showHelpers={false}
-          showGrid={false}
-        />
-      </Canvas>
-
-      <OutputCalibrationOverlay
-        projector={projector}
-        calibration={calibration}
-        selectedMaskId={selectedMaskId}
-        selectedMeta={selectedMeta}
+      <OperatorZoomPanel
+        enabled={calibration.operatorZoomEnabled}
+        panelSize={calibration.operatorPanelSize}
+        zoom={calibration.operatorZoom}
+        panX={calibration.operatorPanX}
+        panY={calibration.operatorPanY}
+        stageProps={stageProps}
       />
     </div>
   );

@@ -462,6 +462,11 @@ function parseLayerDirectives(layerName = "") {
     return fallback;
   };
 
+  const videoFitRaw = readString("video-fit", "contain").toLowerCase();
+  const videoFit = ["contain", "cover", "stretch"].includes(videoFitRaw)
+    ? videoFitRaw
+    : "contain";
+
   const baseName = text.replace(/\[[^\]]+\]/g, "").trim();
 
   return {
@@ -472,7 +477,11 @@ function parseLayerDirectives(layerName = "") {
     videoSpeed: Math.max(0.1, readNumber("video-speed", 1)),
     videoPaused: readBoolFlag("video-paused", false),
     videoLoop: readBoolFlag("video-loop", true),
-    cutout: readBoolFlag("cutout", false)
+    cutout: readBoolFlag("cutout", false),
+    videoFit,
+    videoScale: Math.max(0.2, Math.min(3, readNumber("video-scale", 1))),
+    videoOffsetX: Math.max(-400, Math.min(400, readNumber("video-offset-x", 0))),
+    videoOffsetY: Math.max(-400, Math.min(400, readNumber("video-offset-y", 0)))
   };
 }
 
@@ -531,6 +540,38 @@ function renderCutoutShape(shape, wallW, wallH) {
   return shape?.localWarp
     ? applyMeshWarpToCanvas(canvas, shape.localWarp, wallW, wallH)
     : canvas;
+}
+
+function drawFittedMedia(ctx, media, wallW, wallH, fit, scale, offsetX, offsetY) {
+  const mediaW = Number(media?.videoWidth || media?.naturalWidth || media?.width || wallW);
+  const mediaH = Number(media?.videoHeight || media?.naturalHeight || media?.height || wallH);
+
+  if (!mediaW || !mediaH) {
+    ctx.drawImage(media, 0, 0, wallW, wallH);
+    return;
+  }
+
+  if (fit === "stretch") {
+    const drawW = wallW * scale;
+    const drawH = wallH * scale;
+    const drawX = (wallW - drawW) / 2 + offsetX;
+    const drawY = (wallH - drawH) / 2 + offsetY;
+    ctx.drawImage(media, drawX, drawY, drawW, drawH);
+    return;
+  }
+
+  const baseScale =
+    fit === "cover"
+      ? Math.max(wallW / mediaW, wallH / mediaH)
+      : Math.min(wallW / mediaW, wallH / mediaH);
+
+  const finalScale = baseScale * scale;
+  const drawW = mediaW * finalScale;
+  const drawH = mediaH * finalScale;
+  const drawX = (wallW - drawW) / 2 + offsetX;
+  const drawY = (wallH - drawH) / 2 + offsetY;
+
+  ctx.drawImage(media, drawX, drawY, drawW, drawH);
 }
 
 function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) {
@@ -601,7 +642,17 @@ function renderShape(shape, wallW, wallH, imageCache, videoCache, onAssetReady) 
       if (!videoSettings.paused) {
         safePlay(loadedVideo);
       }
-      ctx.drawImage(loadedVideo, 0, 0, wallW, wallH);
+
+      drawFittedMedia(
+        ctx,
+        loadedVideo,
+        wallW,
+        wallH,
+        directives.videoFit,
+        directives.videoScale,
+        directives.videoOffsetX,
+        directives.videoOffsetY
+      );
     } else {
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.fill();
@@ -734,8 +785,6 @@ function buildCompositeTexture({
   return compositeCanvas;
 }
 
-
-
 function drawMaskPath(ctx, mask) {
   const pts = Array.isArray(mask?.points) ? mask.points : [];
   if (pts.length < 2) return false;
@@ -867,83 +916,83 @@ export function createProjectionTextureAsset({
       onAssetReady
     });
 
-   let sourceCanvas = compositeTexture;
+    let sourceCanvas = compositeTexture;
 
-if (outlineMode === "only") {
-  const outlineCanvas = document.createElement("canvas");
-  outlineCanvas.width = wallW;
-  outlineCanvas.height = wallH;
+    if (outlineMode === "only") {
+      const outlineCanvas = document.createElement("canvas");
+      outlineCanvas.width = wallW;
+      outlineCanvas.height = wallH;
 
-  const outlineCtx = outlineCanvas.getContext("2d");
-  outlineCtx.clearRect(0, 0, wallW, wallH);
+      const outlineCtx = outlineCanvas.getContext("2d");
+      outlineCtx.clearRect(0, 0, wallW, wallH);
 
-  drawAllMaskOutlines(
-    outlineCtx,
-    masks,
-    activeDraft,
-    outlineColor,
-    outlineWidth
-  );
+      drawAllMaskOutlines(
+        outlineCtx,
+        masks,
+        activeDraft,
+        outlineColor,
+        outlineWidth
+      );
 
-  const flashMask =
-    selectedMaskId === "__draft__"
-      ? activeDraft
-      : masks.find((m) => String(m?.id) === String(selectedMaskId));
+      const flashMask =
+        selectedMaskId === "__draft__"
+          ? activeDraft
+          : masks.find((m) => String(m?.id) === String(selectedMaskId));
 
-  drawFlashOverlay(
-    outlineCtx,
-    flashMask,
-    selectedMaskFlashMode === "fill" ? "outline" : selectedMaskFlashMode,
-    selectedMaskFlashColor,
-    selectedMaskFlashSpeed,
-    Math.max(outlineWidth, 3)
-  );
+      drawFlashOverlay(
+        outlineCtx,
+        flashMask,
+        selectedMaskFlashMode === "fill" ? "outline" : selectedMaskFlashMode,
+        selectedMaskFlashColor,
+        selectedMaskFlashSpeed,
+        Math.max(outlineWidth, 3)
+      );
 
-  sourceCanvas = outlineCanvas;
-} else {
-  const overlayCanvas = document.createElement("canvas");
-  overlayCanvas.width = wallW;
-  overlayCanvas.height = wallH;
+      sourceCanvas = outlineCanvas;
+    } else {
+      const overlayCanvas = document.createElement("canvas");
+      overlayCanvas.width = wallW;
+      overlayCanvas.height = wallH;
 
-  const overlayCtx = overlayCanvas.getContext("2d");
-  overlayCtx.clearRect(0, 0, wallW, wallH);
-  overlayCtx.drawImage(compositeTexture, 0, 0);
+      const overlayCtx = overlayCanvas.getContext("2d");
+      overlayCtx.clearRect(0, 0, wallW, wallH);
+      overlayCtx.drawImage(compositeTexture, 0, 0);
 
-  if (outlineMode === "overlay") {
-    drawAllMaskOutlines(
-      overlayCtx,
-      masks,
-      activeDraft,
-      outlineColor,
-      outlineWidth
-    );
-  }
+      if (outlineMode === "overlay") {
+        drawAllMaskOutlines(
+          overlayCtx,
+          masks,
+          activeDraft,
+          outlineColor,
+          outlineWidth
+        );
+      }
 
-  const flashMask =
-    selectedMaskId === "__draft__"
-      ? activeDraft
-      : masks.find((m) => String(m?.id) === String(selectedMaskId));
+      const flashMask =
+        selectedMaskId === "__draft__"
+          ? activeDraft
+          : masks.find((m) => String(m?.id) === String(selectedMaskId));
 
-  drawFlashOverlay(
-    overlayCtx,
-    flashMask,
-    selectedMaskFlashMode,
-    selectedMaskFlashColor,
-    selectedMaskFlashSpeed,
-    Math.max(outlineWidth, 3)
-  );
+      drawFlashOverlay(
+        overlayCtx,
+        flashMask,
+        selectedMaskFlashMode,
+        selectedMaskFlashColor,
+        selectedMaskFlashSpeed,
+        Math.max(outlineWidth, 3)
+      );
 
-  sourceCanvas = overlayCanvas;
-}
+      sourceCanvas = overlayCanvas;
+    }
 
-const finalCanvas = finalWarp
-  ? applyMeshWarpToCanvas(sourceCanvas, finalWarp, wallW, wallH)
-  : sourceCanvas;
+    const finalCanvas = finalWarp
+      ? applyMeshWarpToCanvas(sourceCanvas, finalWarp, wallW, wallH)
+      : sourceCanvas;
 
-ctx.save();
-ctx.globalCompositeOperation = "source-over";
-ctx.drawImage(finalCanvas, 0, 0);
-ctx.restore();
+    ctx.save();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(finalCanvas, 0, 0);
+    ctx.restore();
   };
 
   redraw();

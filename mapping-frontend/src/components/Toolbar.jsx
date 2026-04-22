@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from "react";
 import { ui } from "../styles/ui";
 
@@ -32,6 +31,11 @@ function parseLayerMeta(layerName = "") {
   const videoLoopMatch = text.match(/\[video-loop:([^\]]+)\]/i);
   const cutoutMatch = text.match(/\[cutout:([^\]]+)\]/i);
 
+  const videoFitMatch = text.match(/\[video-fit:([^\]]+)\]/i);
+  const videoScaleMatch = text.match(/\[video-scale:([^\]]+)\]/i);
+  const videoOffsetXMatch = text.match(/\[video-offset-x:([^\]]+)\]/i);
+  const videoOffsetYMatch = text.match(/\[video-offset-y:([^\]]+)\]/i);
+
   return {
     baseName: text
       .replace(/\[blend:[^\]]+\]/gi, "")
@@ -41,6 +45,10 @@ function parseLayerMeta(layerName = "") {
       .replace(/\[video-paused:[^\]]+\]/gi, "")
       .replace(/\[video-loop:[^\]]+\]/gi, "")
       .replace(/\[cutout:[^\]]+\]/gi, "")
+      .replace(/\[video-fit:[^\]]+\]/gi, "")
+      .replace(/\[video-scale:[^\]]+\]/gi, "")
+      .replace(/\[video-offset-x:[^\]]+\]/gi, "")
+      .replace(/\[video-offset-y:[^\]]+\]/gi, "")
       .trim(),
     blend: (blendMatch?.[1] || "source-over").toLowerCase(),
     feather: Math.max(0, Number(featherMatch?.[1] || 0)),
@@ -54,7 +62,15 @@ function parseLayerMeta(layerName = "") {
     ),
     cutout: ["1", "true", "yes", "on"].includes(
       String(cutoutMatch?.[1] || "0").toLowerCase()
+    ),
+    videoFit: ["contain", "cover", "stretch"].includes(
+      String(videoFitMatch?.[1] || "contain").toLowerCase()
     )
+      ? String(videoFitMatch?.[1] || "contain").toLowerCase()
+      : "contain",
+    videoScale: Math.max(0.2, Math.min(3, Number(videoScaleMatch?.[1] || 1) || 1)),
+    videoOffsetX: Math.max(-400, Math.min(400, Number(videoOffsetXMatch?.[1] || 0) || 0)),
+    videoOffsetY: Math.max(-400, Math.min(400, Number(videoOffsetYMatch?.[1] || 0) || 0))
   };
 }
 
@@ -66,7 +82,11 @@ function buildLayerName(
   videoSpeed,
   videoPaused,
   videoLoop,
-  cutout
+  cutout,
+  videoFit,
+  videoScale,
+  videoOffsetX,
+  videoOffsetY
 ) {
   const parts = [];
   const trimmedBase = String(baseName || "").trim();
@@ -99,6 +119,22 @@ function buildLayerName(
 
   if (cutout) {
     parts.push("[cutout:true]");
+  }
+
+  if (videoFit && videoFit !== "contain") {
+    parts.push(`[video-fit:${videoFit}]`);
+  }
+
+  if (Number(videoScale || 1) !== 1) {
+    parts.push(`[video-scale:${Math.max(0.2, Math.min(3, Number(videoScale || 1)))}]`);
+  }
+
+  if (Number(videoOffsetX || 0) !== 0) {
+    parts.push(`[video-offset-x:${Math.max(-400, Math.min(400, Number(videoOffsetX || 0)))}]`);
+  }
+
+  if (Number(videoOffsetY || 0) !== 0) {
+    parts.push(`[video-offset-y:${Math.max(-400, Math.min(400, Number(videoOffsetY || 0)))}]`);
   }
 
   return parts.join(" ").trim() || "default";
@@ -150,6 +186,12 @@ export default function Toolbar({
   const videoPaused = meta.videoPaused || false;
   const videoLoop = meta.videoLoop !== false;
   const cutout = meta.cutout === true;
+
+  const videoFit = meta.videoFit || "contain";
+  const videoScale = meta.videoScale || 1;
+  const videoOffsetX = meta.videoOffsetX || 0;
+  const videoOffsetY = meta.videoOffsetY || 0;
+
   const hasSelectedMask = selectedMaskId !== null && selectedMaskId !== undefined;
   const isIgnoreZone = maskType === "ignore-zone";
 
@@ -174,7 +216,11 @@ export default function Toolbar({
         next.videoSpeed ?? videoSpeed,
         next.videoPaused ?? videoPaused,
         next.videoLoop ?? videoLoop,
-        next.cutout ?? cutout
+        next.cutout ?? cutout,
+        next.videoFit ?? videoFit,
+        next.videoScale ?? videoScale,
+        next.videoOffsetX ?? videoOffsetX,
+        next.videoOffsetY ?? videoOffsetY
       )
     );
   };
@@ -421,7 +467,68 @@ export default function Toolbar({
             />
           </div>
 
-          <div style={{ display: "flex", gap: 8 }}>
+          <div>
+            <div style={ui.label}>Dopasowanie wideo</div>
+            <select
+              style={ui.input}
+              value={videoFit}
+              onChange={(e) => setLayerMeta({ videoFit: e.target.value })}
+            >
+              <option value="contain">contain</option>
+              <option value="cover">cover</option>
+              <option value="stretch">stretch</option>
+            </select>
+          </div>
+
+          <div>
+            <div style={ui.label}>Skala wideo</div>
+            <input
+              type="range"
+              min="0.2"
+              max="3"
+              step="0.05"
+              value={videoScale}
+              onChange={(e) =>
+                setLayerMeta({ videoScale: Number(e.target.value) })
+              }
+              style={{ width: "100%" }}
+            />
+            <div style={ui.small}>{videoScale.toFixed(2)}x</div>
+          </div>
+
+          <div>
+            <div style={ui.label}>Offset X wideo</div>
+            <input
+              type="range"
+              min="-400"
+              max="400"
+              step="1"
+              value={videoOffsetX}
+              onChange={(e) =>
+                setLayerMeta({ videoOffsetX: Number(e.target.value) })
+              }
+              style={{ width: "100%" }}
+            />
+            <div style={ui.small}>{videoOffsetX}px</div>
+          </div>
+
+          <div>
+            <div style={ui.label}>Offset Y wideo</div>
+            <input
+              type="range"
+              min="-400"
+              max="400"
+              step="1"
+              value={videoOffsetY}
+              onChange={(e) =>
+                setLayerMeta({ videoOffsetY: Number(e.target.value) })
+              }
+              style={{ width: "100%" }}
+            />
+            <div style={ui.small}>{videoOffsetY}px</div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               type="button"
               style={ui.button}
@@ -436,6 +543,21 @@ export default function Toolbar({
               onClick={() => setLayerMeta({ videoLoop: !videoLoop })}
             >
               Pętla: {videoLoop ? "WŁ." : "WYŁ."}
+            </button>
+
+            <button
+              type="button"
+              style={ui.button}
+              onClick={() =>
+                setLayerMeta({
+                  videoFit: "contain",
+                  videoScale: 1,
+                  videoOffsetX: 0,
+                  videoOffsetY: 0
+                })
+              }
+            >
+              Reset dopasowania
             </button>
           </div>
         </>

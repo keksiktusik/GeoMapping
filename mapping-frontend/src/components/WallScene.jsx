@@ -117,11 +117,28 @@ function ProjectorHelper({ projector }) {
   );
 }
 
+function getInsetCameraPosition(modelRotation = [0, 0, 0]) {
+  const ry = Number(modelRotation?.[1] || 0);
+  const eps = 0.001;
+
+  if (Math.abs(ry + Math.PI / 2) < eps || Math.abs(ry - Math.PI / 2) < eps) {
+    return [0, 0, 12];
+  }
+
+  if (Math.abs(Math.abs(ry) - Math.PI) < eps) {
+    return [10, 0, 0];
+  }
+
+  return [12, 0, 0];
+}
+
 function FittedGlbModel({
   modelUrl,
   projectionTexture,
   projector,
-  showEdges = true
+  showEdges = true,
+  modelRotation = [0, 0, 0],
+  modelOffset = [0, 0, 0]
 }) {
   const { scene } = useGLTF(modelUrl);
 
@@ -180,22 +197,30 @@ function FittedGlbModel({
     };
   }, [projectionClone, projectedMaterial]);
 
+  const finalPosition = [
+    -fit.center.x + Number(modelOffset?.[0] || 0),
+    -fit.center.y + Number(modelOffset?.[1] || 0),
+    -fit.center.z + Number(modelOffset?.[2] || 0)
+  ];
+
   return (
     <group scale={[fit.scale, fit.scale, fit.scale]}>
       <primitive
         object={baseClone}
-        position={[-fit.center.x, -fit.center.y, -fit.center.z]}
+        position={finalPosition}
+        rotation={modelRotation}
       />
 
       {projectedMaterial && (
         <primitive
           object={projectionClone}
-          position={[-fit.center.x, -fit.center.y, -fit.center.z]}
+          position={finalPosition}
+          rotation={modelRotation}
         />
       )}
 
       {showEdges && (
-        <group position={[-fit.center.x, -fit.center.y, -fit.center.z]}>
+        <group position={finalPosition} rotation={modelRotation}>
           {edgesClone.children.map((child, index) =>
             child.isMesh ? (
               <mesh
@@ -251,6 +276,8 @@ function PlanePreview({ projectionTexture, projector }) {
 function SceneContent({
   renderMode,
   modelUrl,
+  modelRotation = [0, 0, 0],
+  modelOffset = [0, 0, 0],
   projectionTexture,
   projector,
   showEdges = true
@@ -278,6 +305,8 @@ function SceneContent({
           projectionTexture={projectionTexture}
           projector={projector}
           showEdges={showEdges}
+          modelRotation={modelRotation}
+          modelOffset={modelOffset}
         />
       ) : (
         <PlanePreview
@@ -292,9 +321,13 @@ function SceneContent({
 export default function WallScene({
   renderMode = "plane",
   modelUrl,
+  modelRotation = [0, 0, 0],
+  modelOffset = [0, 0, 0],
   projectionTexture,
   projector
 }) {
+  const insetCameraPosition = getInsetCameraPosition(modelRotation);
+
   return (
     <div
       style={{
@@ -307,11 +340,13 @@ export default function WallScene({
         position: "relative"
       }}
     >
-      <Canvas camera={{ position: [0, 0, 8], fov: 45 }}>
+      <Canvas camera={{ position: [0, 0, 10.5], fov: 45 }}>
         <color attach="background" args={["#0b1220"]} />
         <SceneContent
           renderMode={renderMode}
           modelUrl={modelUrl}
+          modelRotation={modelRotation}
+          modelOffset={modelOffset}
           projectionTexture={projectionTexture}
           projector={projector}
           showEdges={true}
@@ -333,11 +368,13 @@ export default function WallScene({
           boxShadow: "0 8px 20px rgba(0,0,0,0.35)"
         }}
       >
-        <Canvas camera={{ position: [10, 0, 0], fov: 35 }}>
+        <Canvas camera={{ position: insetCameraPosition, fov: 35 }}>
           <color attach="background" args={["#0b1220"]} />
           <SceneContent
             renderMode={renderMode}
             modelUrl={modelUrl}
+            modelRotation={modelRotation}
+            modelOffset={modelOffset}
             projectionTexture={projectionTexture}
             projector={projector}
             showEdges={true}
