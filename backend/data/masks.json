@@ -1,133 +1,12 @@
 [
   {
-    "id": 1,
-    "modelId": 1,
-    "name": "mickiewicz test",
-    "type": "window",
-    "operation": "add",
-    "zIndex": 0,
-    "visible": false,
-    "locked": false,
-    "layerName": "default [video-scale:1.1] [video-offset-x:-23] [video-offset-y:-31]",
-    "textureType": "video",
-    "textureValue": "/videos/0430(8).mp4",
-    "opacity": 1,
-    "points": [
-      {
-        "x": 0,
-        "y": 68
-      },
-      {
-        "x": 799,
-        "y": 62
-      },
-      {
-        "x": 798,
-        "y": 468
-      },
-      {
-        "x": 12,
-        "y": 486
-      }
-    ],
-    "localWarp": {
-      "mode": "mesh",
-      "cols": 4,
-      "rows": 4,
-      "points": [
-        {
-          "x": 0,
-          "y": 0,
-          "pinned": false
-        },
-        {
-          "x": 266.66666666666663,
-          "y": 0,
-          "pinned": false
-        },
-        {
-          "x": 533.3333333333333,
-          "y": 0,
-          "pinned": false
-        },
-        {
-          "x": 800,
-          "y": 0,
-          "pinned": false
-        },
-        {
-          "x": 0,
-          "y": 166.66666666666666,
-          "pinned": false
-        },
-        {
-          "x": 266.66666666666663,
-          "y": 166.66666666666666,
-          "pinned": false
-        },
-        {
-          "x": 533.3333333333333,
-          "y": 166.66666666666666,
-          "pinned": false
-        },
-        {
-          "x": 800,
-          "y": 166.66666666666666,
-          "pinned": false
-        },
-        {
-          "x": 0,
-          "y": 333.3333333333333,
-          "pinned": false
-        },
-        {
-          "x": 266.66666666666663,
-          "y": 333.3333333333333,
-          "pinned": false
-        },
-        {
-          "x": 533.3333333333333,
-          "y": 333.3333333333333,
-          "pinned": false
-        },
-        {
-          "x": 800,
-          "y": 333.3333333333333,
-          "pinned": false
-        },
-        {
-          "x": 0,
-          "y": 500,
-          "pinned": false
-        },
-        {
-          "x": 266.66666666666663,
-          "y": 500,
-          "pinned": false
-        },
-        {
-          "x": 533.3333333333333,
-          "y": 500,
-          "pinned": false
-        },
-        {
-          "x": 800,
-          "y": 500,
-          "pinned": false
-        }
-      ]
-    },
-    "createdAt": "2026-05-02T20:11:19.207Z",
-    "updatedAt": "2026-05-02T20:11:46.185Z"
-  },
-  {
     "id": 2,
     "modelId": 1,
     "name": "3.1",
     "type": "window",
     "operation": "add",
     "zIndex": 0,
-    "visible": true,
+    "visible": false,
     "locked": false,
     "layerName": "default",
     "textureType": "video",
@@ -239,7 +118,7 @@
       ]
     },
     "createdAt": "2026-05-02T20:15:32.292Z",
-    "updatedAt": "2026-05-02T20:15:37.611Z"
+    "updatedAt": "2026-05-05T14:36:19.440Z"
   },
   {
     "id": 3,
@@ -248,7 +127,7 @@
     "type": "window",
     "operation": "add",
     "zIndex": 0,
-    "visible": true,
+    "visible": false,
     "locked": false,
     "layerName": "default [video-scale:0.5] [video-offset-x:28] [video-offset-y:80]",
     "textureType": "video",
@@ -360,7 +239,7 @@
       ]
     },
     "createdAt": "2026-05-02T20:17:11.725Z",
-    "updatedAt": "2026-05-02T20:17:11.725Z"
+    "updatedAt": "2026-05-05T14:36:20.102Z"
   },
   {
     "id": 4,
@@ -369,7 +248,7 @@
     "type": "window",
     "operation": "add",
     "zIndex": 0,
-    "visible": true,
+    "visible": false,
     "locked": false,
     "layerName": "default [video-scale:0.5] [video-offset-x:-226] [video-offset-y:83]",
     "textureType": "video",
@@ -481,6 +360,248 @@
       ]
     },
     "createdAt": "2026-05-02T20:19:27.230Z",
-    "updatedAt": "2026-05-02T20:19:27.230Z"
+    "updatedAt": "2026-05-05T14:36:20.231Z"
+  },
+  {
+    "id": 5,
+    "modelId": 1,
+    "name": "mickiewicz",
+    "type": "window",
+    "operation": "add",
+    "zIndex": 0,
+    "visible": false,
+    "locked": false,
+    "layerName": "default [video-scale:0.8] [video-offset-x:-12] [video-offset-y:-20]",
+    "textureType": "video",
+    "textureValue": "/videos/0430(4).mp4",
+    "opacity": 1,
+    "points": [
+      {
+        "x": 690,
+        "y": 99
+      },
+      {
+        "x": 678,
+        "y": 413
+      },
+      {
+        "x": 118,
+        "y": 392
+      },
+      {
+        "x": 116,
+        "y": 117
+      }
+    ],
+    "localWarp": {
+      "mode": "mesh",
+      "cols": 4,
+      "rows": 4,
+      "points": [
+        {
+          "x": 0,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 0,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 0,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 0,
+          "y": 500,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 500,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 500,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 500,
+          "pinned": false
+        }
+      ]
+    },
+    "createdAt": "2026-05-05T15:06:49.568Z",
+    "updatedAt": "2026-05-05T17:09:46.821Z"
+  },
+  {
+    "id": 6,
+    "modelId": 1,
+    "name": "dworzec",
+    "type": "window",
+    "operation": "add",
+    "zIndex": 0,
+    "visible": true,
+    "locked": false,
+    "layerName": "default [video-scale:0.75] [video-offset-x:-14] [video-offset-y:-18]",
+    "textureType": "video",
+    "textureValue": "/videos/dworzec1.mp4",
+    "opacity": 1,
+    "points": [
+      {
+        "x": 86,
+        "y": 200
+      },
+      {
+        "x": 98,
+        "y": 308
+      },
+      {
+        "x": 687,
+        "y": 299
+      },
+      {
+        "x": 700,
+        "y": 203
+      }
+    ],
+    "localWarp": {
+      "mode": "mesh",
+      "cols": 4,
+      "rows": 4,
+      "points": [
+        {
+          "x": 0,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 0,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 0,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 0,
+          "y": 500,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 500,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 500,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 500,
+          "pinned": false
+        }
+      ]
+    },
+    "createdAt": "2026-05-05T17:11:49.344Z",
+    "updatedAt": "2026-05-05T17:43:17.909Z"
   }
 ]
