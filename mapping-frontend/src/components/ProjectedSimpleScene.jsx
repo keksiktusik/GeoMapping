@@ -8,6 +8,10 @@ function degToRad(v) {
   return THREE.MathUtils.degToRad(Number(v || 0));
 }
 
+function clampOpacity(value) {
+  return Math.max(0, Math.min(1, Number(value ?? 1)));
+}
+
 function getSafeProjector(projector = {}) {
   return {
     distance: Math.max(MIN_DISTANCE, Number(projector?.distance || 2.5)),
@@ -118,6 +122,8 @@ function FittedProjectedModel({
   projector,
   modelRotation = [0, 0, 0],
   modelOffset = [0, 0, 0],
+  modelScale = 1,
+  facadeOpacity = 1,
   depthOffsets = {
     front: 0.06,
     middle: 0,
@@ -125,6 +131,7 @@ function FittedProjectedModel({
   }
 }) {
   const { scene } = useGLTF(modelUrl);
+  const safeFacadeOpacity = clampOpacity(facadeOpacity);
 
   const fit = useMemo(() => {
     const measureClone = scene.clone();
@@ -135,8 +142,8 @@ function FittedProjectedModel({
     box.getSize(size);
     box.getCenter(center);
 
-    const targetWidth = 8;
-    const targetHeight = 5;
+    const targetWidth = 12;
+    const targetHeight = 7.5;
 
     const sx = targetWidth / (size.x || 1);
     const sy = targetHeight / (size.y || 1);
@@ -174,33 +181,42 @@ function FittedProjectedModel({
           roughness: 0.9,
           metalness: 0.05,
           transparent: true,
-          opacity: 1
+          opacity: safeFacadeOpacity,
+          depthWrite: false
         });
+
+        obj.visible = safeFacadeOpacity > 0.001;
       }
     });
-  }, [baseClone]);
+  }, [baseClone, safeFacadeOpacity]);
 
   useEffect(() => {
     if (!frontMaterial) return;
+
     frontClone.traverse((obj) => {
       if (obj.isMesh) obj.material = frontMaterial;
     });
+
     return () => frontMaterial.dispose();
   }, [frontClone, frontMaterial]);
 
   useEffect(() => {
     if (!middleMaterial) return;
+
     middleClone.traverse((obj) => {
       if (obj.isMesh) obj.material = middleMaterial;
     });
+
     return () => middleMaterial.dispose();
   }, [middleClone, middleMaterial]);
 
   useEffect(() => {
     if (!backMaterial) return;
+
     backClone.traverse((obj) => {
       if (obj.isMesh) obj.material = backMaterial;
     });
+
     return () => backMaterial.dispose();
   }, [backClone, backMaterial]);
 
@@ -229,12 +245,20 @@ function FittedProjectedModel({
   ];
 
   return (
-    <group scale={[fit.scale, fit.scale, fit.scale]}>
-      <primitive
-        object={baseClone}
-        position={basePosition}
-        rotation={modelRotation}
-      />
+    <group
+      scale={[
+        fit.scale * modelScale,
+        fit.scale * modelScale,
+        fit.scale * modelScale
+      ]}
+    >
+      {safeFacadeOpacity > 0.001 ? (
+        <primitive
+          object={baseClone}
+          position={basePosition}
+          rotation={modelRotation}
+        />
+      ) : null}
 
       {backMaterial && (
         <primitive
@@ -260,22 +284,27 @@ function FittedProjectedModel({
         />
       )}
 
-      <group position={basePosition} rotation={modelRotation}>
-        {edgesClone.children.map((child, index) =>
-          child.isMesh ? (
-            <mesh
-              key={index}
-              geometry={child.geometry}
-              position={child.position}
-              rotation={child.rotation}
-              scale={child.scale}
-            >
-              <meshBasicMaterial transparent opacity={0} />
-              <Edges color="white" threshold={15} />
-            </mesh>
-          ) : null
-        )}
-      </group>
+      {safeFacadeOpacity > 0.02 ? (
+        <group position={basePosition} rotation={modelRotation}>
+          {edgesClone.children.map((child, index) =>
+            child.isMesh ? (
+              <mesh
+                key={index}
+                geometry={child.geometry}
+                position={child.position}
+                rotation={child.rotation}
+                scale={child.scale}
+              >
+                <meshBasicMaterial transparent opacity={0} />
+                <Edges
+                  color="white"
+                  threshold={15}
+                />
+              </mesh>
+            ) : null
+          )}
+        </group>
+      ) : null}
     </group>
   );
 }
@@ -283,12 +312,15 @@ function FittedProjectedModel({
 function PlaneProjected({
   textures,
   projector,
+  facadeOpacity = 1,
   depthOffsets = {
     front: 0.06,
     middle: 0,
     back: -0.06
   }
 }) {
+  const safeFacadeOpacity = clampOpacity(facadeOpacity);
+
   const frontMaterial = useMemo(
     () => createProjectedMaterial(textures?.front, projector, 8 / 5),
     [textures?.front, projector]
@@ -314,10 +346,17 @@ function PlaneProjected({
 
   return (
     <group>
-      <mesh position={[0, 0, 0]}>
-        <planeGeometry args={[8, 5]} />
-        <meshStandardMaterial color="#bfc7d4" />
-      </mesh>
+      {safeFacadeOpacity > 0.001 ? (
+        <mesh position={[0, 0, 0]}>
+          <planeGeometry args={[8, 5]} />
+          <meshStandardMaterial
+            color="#bfc7d4"
+            transparent
+            opacity={safeFacadeOpacity}
+            depthWrite={false}
+          />
+        </mesh>
+      ) : null}
 
       {backMaterial && (
         <mesh position={[0, 0, Number(depthOffsets?.back || 0)]}>
@@ -348,6 +387,8 @@ export default function ProjectedSimpleScene({
   modelUrl,
   modelRotation = [0, 0, 0],
   modelOffset = [0, 0, 0],
+  modelScale = 1,
+  facadeOpacity = 1,
   textures,
   projector,
   depthOffsets = {
@@ -385,12 +426,15 @@ export default function ProjectedSimpleScene({
           projector={projector}
           modelRotation={modelRotation}
           modelOffset={modelOffset}
+          modelScale={modelScale}
+          facadeOpacity={facadeOpacity}
           depthOffsets={depthOffsets}
         />
       ) : (
         <PlaneProjected
           textures={textures}
           projector={projector}
+          facadeOpacity={facadeOpacity}
           depthOffsets={depthOffsets}
         />
       )}

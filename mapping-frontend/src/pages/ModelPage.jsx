@@ -309,6 +309,10 @@ export default function ModelPage() {
     stored?.outputModelUrl || selectedModelUrl
   );
 
+  const [outputModelScale, setOutputModelScale] = useState(
+  Number(stored?.outputModelScale || 1)
+);
+
   const [mode, setMode] = useState("draw");
   const [points, setPoints] = useState([]);
   const [isClosed, setIsClosed] = useState(false);
@@ -397,7 +401,11 @@ export default function ModelPage() {
     ),
     selectedMaskSoloInOutput: Boolean(stored?.calibration?.selectedMaskSoloInOutput),
     outputBlackoutMode: Boolean(stored?.calibration?.outputBlackoutMode),
-    selectedMaskOutlineBoost: stored?.calibration?.selectedMaskOutlineBoost !== false
+selectedMaskOutlineBoost: stored?.calibration?.selectedMaskOutlineBoost !== false,
+facadeOpacity: Math.max(
+  0,
+  Math.min(1, Number(stored?.calibration?.facadeOpacity ?? 1))
+)
   }));
 
   const [maskName, setMaskName] = useState("");
@@ -1300,11 +1308,7 @@ export default function ModelPage() {
     }
   };
 
-  useEffect(() => {
-    setTextureValue((prev) => normalizeTextureValue(textureType, prev));
-  }, [textureType]);
-
-  useEffect(() => {
+   useEffect(() => {
     if (isOutput) return;
 
     try {
@@ -1314,6 +1318,7 @@ export default function ModelPage() {
           points,
           isClosed,
           opacity,
+          outputModelScale,
           editorSoloSelected,
           showGrid,
           showPinkBackground,
@@ -1356,6 +1361,7 @@ export default function ModelPage() {
     points,
     isClosed,
     opacity,
+    outputModelScale,
     editorSoloSelected,
     showGrid,
     showPinkBackground,
@@ -1383,7 +1389,7 @@ export default function ModelPage() {
     normalizedTextureValue,
     selectedOrDraftLocalWarp
   ]);
-
+  
   useEffect(() => {
     if (isOutput) return;
 
@@ -1907,7 +1913,7 @@ export default function ModelPage() {
       style={{
         position: "relative",
         width: "100%",
-        minHeight: 420
+    
       }}
     >
       <WallScene
@@ -1987,43 +1993,77 @@ export default function ModelPage() {
 
         <div style={ui.sidebarRight}>
           <SidebarPanel title="Model i output">
-            <div style={{ display: "grid", gap: 10 }}>
-              <label style={{ display: "grid", gap: 6 }}>
-                <span style={ui.label}>Tryb podglądu</span>
-                <select
-                  style={ui.input}
-                  value={renderMode}
-                  onChange={(e) => setRenderMode(e.target.value)}
-                >
-                  <option value="glb">GLB</option>
-                  <option value="plane">Plane</option>
-                </select>
-              </label>
+  <div style={{ display: "grid", gap: 10 }}>
 
-              <label style={{ display: "grid", gap: 6 }}>
-                <span style={ui.label}>Wybrana fasada</span>
-                <select
-                  style={ui.input}
-                  value={selectedModelKey}
-                  onChange={(e) => {
-                    const nextKey = e.target.value;
-                    setSelectedModelKey(nextKey);
+    <label style={{ display: "grid", gap: 6 }}>
+  <span style={ui.label}>Tryb podglądu</span>
 
-                    const nextModel = MODEL_CONFIG[nextKey];
-                    if (nextModel?.url) {
-                      setOutputModelUrl(nextModel.url);
-                    }
-                  }}
-                >
-                  {Object.entries(MODEL_CONFIG)
-                    .filter(([, model]) => model.enabled !== false)
-                    .map(([key, model]) => (
-                      <option key={key} value={key}>
-                        {model.label}
-                      </option>
-                    ))}
-                </select>
-              </label>
+  <select
+    style={ui.input}
+    value={renderMode}
+    onChange={(e) => setRenderMode(e.target.value)}
+  >
+    <option value="glb">GLB</option>
+    <option value="plane">Plane</option>
+  </select>
+</label>
+
+<label style={{ display: "grid", gap: 6 }}>
+  <span style={ui.label}>
+    Widoczność fasady w projektorze
+  </span>
+
+  <input
+    type="range"
+    min="0"
+    max="1"
+    step="0.01"
+    value={calibration?.facadeOpacity ?? 1}
+    onChange={(e) =>
+      setCalibration((prev) => ({
+        ...prev,
+        facadeOpacity: Number(e.target.value)
+      }))
+    }
+  />
+
+  <div
+    style={{
+      fontSize: 12,
+      opacity: 0.7
+    }}
+  >
+    {Math.round(
+      (calibration?.facadeOpacity ?? 1) * 100
+    )}%
+  </div>
+</label>
+
+<label style={{ display: "grid", gap: 6 }}>
+  <span style={ui.label}>
+    Skala outputu
+  </span>
+
+  <input
+    type="range"
+    min="0.5"
+    max="3"
+    step="0.01"
+    value={outputModelScale}
+    onChange={(e) =>
+      setOutputModelScale(Number(e.target.value))
+    }
+  />
+
+  <div
+    style={{
+      fontSize: 12,
+      opacity: 0.7
+    }}
+  >
+    x{outputModelScale.toFixed(2)}
+  </div>
+</label>
 
               <label style={{ display: "grid", gap: 6 }}>
                 <span style={ui.label}>Powierzchnia outputu</span>

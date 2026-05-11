@@ -19,6 +19,7 @@ const DEFAULT_CALIBRATION = {
   showOverlay: true,
   showGrid: true,
   showCrosshair: true,
+  facadeOpacity: 1,
   nudgeStep: 0.05,
   angleStep: 1,
   showInfo: true,
@@ -127,6 +128,16 @@ function normalizeCalibration(calibration = {}) {
     typeof value === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value);
 
   return {
+    facadeOpacity: Math.max(
+  0,
+  Math.min(
+    1,
+    Number(
+      calibration?.facadeOpacity ??
+      DEFAULT_CALIBRATION.facadeOpacity
+    )
+  )
+),
     showOverlay: calibration?.showOverlay !== false,
     showGrid: calibration?.showGrid !== false,
     showCrosshair: calibration?.showCrosshair !== false,
@@ -894,6 +905,7 @@ function OutputStage({
   modelUrl,
   modelRotation,
   modelOffset,
+  modelScale = 1,
   outputCameraPosition,
   textures,
   compact = false
@@ -915,17 +927,21 @@ function OutputStage({
         }}
       >
         <ProjectedSimpleScene
-          mode={mode}
-          modelUrl={modelUrl}
-          modelRotation={modelRotation}
-          modelOffset={modelOffset}
-          textures={textures}
-          projector={projector}
-          depthOffsets={{
-            front: 0.06,
-            middle: 0,
-            back: -0.06
-          }}
+  mode={mode}
+  modelUrl={modelUrl}
+  modelRotation={modelRotation}
+  modelOffset={modelOffset}
+  modelScale={modelScale}   
+  facadeOpacity={
+  calibration?.facadeOpacity ?? 1
+}
+  textures={textures}
+  projector={projector}
+  depthOffsets={{
+    front: 0.06,
+    middle: 0,
+    back: -0.06
+  }}
           enableControls={false}
           showHelpers={false}
           showGrid={false}
@@ -1019,6 +1035,10 @@ function OperatorZoomPanel({
 
 export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
   const [state, setState] = useState({});
+  const modelScale = useMemo(
+  () => Number(state?.selectedModelScale ?? 1),
+  [state]
+);
   const [frontTexture, setFrontTexture] = useState(null);
   const [middleTexture, setMiddleTexture] = useState(null);
   const [backTexture, setBackTexture] = useState(null);
@@ -1082,7 +1102,49 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
       if (activeTag === "input" || activeTag === "textarea" || activeTag === "select") {
         return;
       }
+      if (e.altKey) {
+  const key = e.key.toLowerCase();
 
+  if (key === "w") {
+    updateStoredState((p) => ({
+      ...p,
+      selectedModelScale: Math.min(10, (p?.selectedModelScale || 1) + 0.1)
+    }));
+    e.preventDefault();
+    return;
+  }
+
+  if (key === "s") {
+    updateStoredState((p) => ({
+      ...p,
+      selectedModelScale: Math.max(0.1, (p?.selectedModelScale || 1) - 0.1)
+    }));
+    e.preventDefault();
+    return;
+  }
+}
+// =====================
+// MODEL SCALE CTRL (NEW)
+// =====================
+if (e.ctrlKey) {
+  if (e.key.toLowerCase() === "w") {
+    updateStoredState((parsed) => ({
+      ...parsed,
+      selectedModelScale: Math.min(10, (parsed?.selectedModelScale || 1) + 0.1)
+    }));
+    e.preventDefault();
+    return;
+  }
+
+  if (e.key.toLowerCase() === "s") {
+    updateStoredState((parsed) => ({
+      ...parsed,
+      selectedModelScale: Math.max(0.1, (parsed?.selectedModelScale || 1) - 0.1)
+    }));
+    e.preventDefault();
+    return;
+  }
+}
       const moveStep = e.shiftKey
         ? Math.max(0.01, calibration.nudgeStep / 2)
         : calibration.nudgeStep;
@@ -1269,14 +1331,25 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
         case "E":
           updateStoredProjector((prev) => ({ ...prev, angleZ: Number(prev?.angleZ || 0) + angleStep }));
           break;
-        case "w":
-        case "W":
-          updateStoredProjector((prev) => ({ ...prev, angleX: Number(prev?.angleX || 0) + angleStep }));
-          break;
-        case "s":
-        case "S":
-          updateStoredProjector((prev) => ({ ...prev, angleX: Number(prev?.angleX || 0) - angleStep }));
-          break;
+       case "w":
+case "W":
+  if (!e.altKey) {
+    updateStoredProjector((prev) => ({
+      ...prev,
+      angleX: Number(prev?.angleX || 0) + angleStep
+    }));
+  }
+  break;
+
+case "s":
+case "S":
+  if (!e.altKey) {
+    updateStoredProjector((prev) => ({
+      ...prev,
+      angleX: Number(prev?.angleX || 0) - angleStep
+    }));
+  }
+  break;
         case "a":
         case "A":
           updateStoredProjector((prev) => ({ ...prev, angleY: Number(prev?.angleY || 0) - angleStep }));
@@ -1378,6 +1451,7 @@ export default function ProjectorOutput({ wallW = 800, wallH = 500 }) {
     modelUrl: currentModelUrl,
     modelRotation,
     modelOffset,
+    modelScale: Number(state?.outputModelScale || 1),
     outputCameraPosition,
     textures: {
       front: frontTexture,

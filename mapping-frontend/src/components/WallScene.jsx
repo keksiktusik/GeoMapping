@@ -324,7 +324,9 @@ export default function WallScene({
   modelRotation = [0, 0, 0],
   modelOffset = [0, 0, 0],
   projectionTexture,
-  projector
+  projector,
+  wallW = 800,
+  wallH = 500
 }) {
   const insetCameraPosition = getInsetCameraPosition(modelRotation);
 
@@ -332,7 +334,7 @@ export default function WallScene({
     <div
       style={{
         width: "100%",
-        height: 600,
+        aspectRatio: `${wallW} / ${wallH}`,
         borderRadius: 12,
         overflow: "hidden",
         border: "1px solid #243041",
@@ -359,13 +361,16 @@ export default function WallScene({
           position: "absolute",
           right: 12,
           bottom: 12,
-          width: 220,
-          height: 160,
+          width: "26%",
+          maxWidth: 220,
+          minWidth: 140,
+          aspectRatio: "220 / 160",
           border: "1px solid #2f4159",
           borderRadius: 10,
           overflow: "hidden",
           background: "#0b1220",
-          boxShadow: "0 8px 20px rgba(0,0,0,0.35)"
+          boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
+          pointerEvents: "none"
         }}
       >
         <Canvas camera={{ position: insetCameraPosition, fov: 35 }}>

@@ -118,7 +118,7 @@
       ]
     },
     "createdAt": "2026-05-02T20:15:32.292Z",
-    "updatedAt": "2026-05-05T14:36:19.440Z"
+    "updatedAt": "2026-05-10T22:07:44.041Z"
   },
   {
     "id": 3,
@@ -239,7 +239,7 @@
       ]
     },
     "createdAt": "2026-05-02T20:17:11.725Z",
-    "updatedAt": "2026-05-05T14:36:20.102Z"
+    "updatedAt": "2026-05-10T22:07:44.160Z"
   },
   {
     "id": 4,
@@ -360,7 +360,7 @@
       ]
     },
     "createdAt": "2026-05-02T20:19:27.230Z",
-    "updatedAt": "2026-05-05T14:36:20.231Z"
+    "updatedAt": "2026-05-10T22:07:44.281Z"
   },
   {
     "id": 5,
@@ -385,8 +385,8 @@
         "y": 413
       },
       {
-        "x": 118,
-        "y": 392
+        "x": 116,
+        "y": 414
       },
       {
         "x": 116,
@@ -481,7 +481,7 @@
       ]
     },
     "createdAt": "2026-05-05T15:06:49.568Z",
-    "updatedAt": "2026-05-05T17:09:46.821Z"
+    "updatedAt": "2026-05-10T22:07:44.410Z"
   },
   {
     "id": 6,
@@ -490,11 +490,11 @@
     "type": "window",
     "operation": "add",
     "zIndex": 0,
-    "visible": true,
+    "visible": false,
     "locked": false,
     "layerName": "default [video-scale:0.75] [video-offset-x:-14] [video-offset-y:-18]",
     "textureType": "video",
-    "textureValue": "/videos/dworzec1.mp4",
+    "textureValue": "/videos/dworzec4.mp4",
     "opacity": 1,
     "points": [
       {
@@ -602,6 +602,127 @@
       ]
     },
     "createdAt": "2026-05-05T17:11:49.344Z",
-    "updatedAt": "2026-05-05T17:43:17.909Z"
+    "updatedAt": "2026-05-10T22:07:44.529Z"
+  },
+  {
+    "id": 7,
+    "modelId": 1,
+    "name": "kolej",
+    "type": "window",
+    "operation": "add",
+    "zIndex": 2,
+    "visible": true,
+    "locked": false,
+    "layerName": "default [video-scale:1.15] [video-offset-x:1] [video-offset-y:11]",
+    "textureType": "video",
+    "textureValue": "/videos/kolejka.mp4",
+    "opacity": 1,
+    "points": [
+      {
+        "x": 798,
+        "y": 8
+      },
+      {
+        "x": 798,
+        "y": 485
+      },
+      {
+        "x": 1,
+        "y": 491
+      },
+      {
+        "x": 3,
+        "y": 0
+      }
+    ],
+    "localWarp": {
+      "mode": "mesh",
+      "cols": 4,
+      "rows": 4,
+      "points": [
+        {
+          "x": 0,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 0,
+          "pinned": false
+        },
+        {
+          "x": 0,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 166.66666666666666,
+          "pinned": false
+        },
+        {
+          "x": 0,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 333.3333333333333,
+          "pinned": false
+        },
+        {
+          "x": 0,
+          "y": 500,
+          "pinned": false
+        },
+        {
+          "x": 266.66666666666663,
+          "y": 500,
+          "pinned": false
+        },
+        {
+          "x": 533.3333333333333,
+          "y": 500,
+          "pinned": false
+        },
+        {
+          "x": 800,
+          "y": 500,
+          "pinned": false
+        }
+      ]
+    },
+    "createdAt": "2026-05-07T15:11:25.662Z",
+    "updatedAt": "2026-05-10T22:08:51.730Z"
   }
 ]
